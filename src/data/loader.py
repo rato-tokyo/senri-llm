@@ -4,7 +4,7 @@ import random
 import string
 from typing import Optional, Dict, Any
 
-from datasets import load_dataset, DatasetDict, Dataset
+from datasets import load_dataset, DatasetDict
 
 
 def generate_random_key(length: int = 8) -> str:
@@ -76,61 +76,61 @@ class NIAHInjector:
 
 
 def load_training_dataset(
-    dataset_name: str = "wikitext",
-    dataset_config: Optional[str] = "wikitext-2-raw-v1",
-    niah_ratio: float = 0.0,
-    max_train_samples: Optional[int] = None,
-    max_val_samples: Optional[int] = None,
+    dataset_name: str = "pg19",
+    dataset_config: Optional[str] = None,
+    niah_ratio: float = 0.01,
+    max_train_samples: Optional[int] = 1000,
+    max_val_samples: Optional[int] = 100,
     seed: int = 42,
 ) -> DatasetDict:
     """
     Load a training dataset with optional NIAH task injection.
 
+    Default is PG19 (long books) with 1% NIAH task injection per HSA paper.
+
     Args:
-        dataset_name: HuggingFace dataset name ('pg19', 'wikitext', etc.).
-        dataset_config: Dataset configuration name.
-        niah_ratio: Ratio of NIAH tasks to inject (0.0 to disable).
-        max_train_samples: Maximum training samples (for large datasets).
-        max_val_samples: Maximum validation samples.
+        dataset_name: HuggingFace dataset name. Default 'pg19' for long-context.
+        dataset_config: Dataset configuration name (optional).
+        niah_ratio: Ratio of NIAH tasks to inject (default 1% per HSA paper).
+        max_train_samples: Maximum training samples (default 1000).
+        max_val_samples: Maximum validation samples (default 100).
         seed: Random seed for reproducibility.
 
     Returns:
         Dataset with train/validation splits.
     """
-    try:
-        if dataset_name == "pg19":
-            print(f"Loading PG19 dataset (long books)...")
-            train_dataset = load_dataset("emozilla/pg19", split="train")
-            val_dataset = load_dataset("emozilla/pg19", split="validation")
+    print(f"Loading {dataset_name} dataset...")
 
-            # Limit samples for faster experiments
-            if max_train_samples and len(train_dataset) > max_train_samples:
-                train_dataset = train_dataset.select(range(max_train_samples))
-            if max_val_samples and len(val_dataset) > max_val_samples:
-                val_dataset = val_dataset.select(range(max_val_samples))
+    if dataset_name == "pg19":
+        train_dataset = load_dataset("emozilla/pg19", split="train")
+        val_dataset = load_dataset("emozilla/pg19", split="validation")
 
-            dataset = DatasetDict({"train": train_dataset, "validation": val_dataset})
-            print(f"Loaded PG19: {len(train_dataset)} train, {len(val_dataset)} val")
+        # Limit samples for faster experiments
+        if max_train_samples and len(train_dataset) > max_train_samples:
+            train_dataset = train_dataset.select(range(max_train_samples))
+        if max_val_samples and len(val_dataset) > max_val_samples:
+            val_dataset = val_dataset.select(range(max_val_samples))
 
+        dataset = DatasetDict({"train": train_dataset, "validation": val_dataset})
+        print(f"Loaded PG19: {len(train_dataset)} train, {len(val_dataset)} val")
+
+    else:
+        # Generic loading for other datasets
+        if dataset_config:
+            dataset = load_dataset(dataset_name, dataset_config)
+            print(f"Loaded dataset: {dataset_name}/{dataset_config}")
         else:
-            # Generic loading (wikitext, etc.)
-            config = dataset_config or "wikitext-2-raw-v1"
-            dataset = load_dataset(dataset_name, config)
-            print(f"Loaded dataset: {dataset_name}/{config}")
+            dataset = load_dataset(dataset_name)
+            print(f"Loaded dataset: {dataset_name}")
 
-            # Apply sample limits
-            if max_train_samples and len(dataset["train"]) > max_train_samples:
-                dataset["train"] = dataset["train"].select(range(max_train_samples))
-            if max_val_samples and "validation" in dataset:
-                if len(dataset["validation"]) > max_val_samples:
-                    dataset["validation"] = dataset["validation"].select(
-                        range(max_val_samples)
-                    )
-
-    except Exception as e:
-        print(f"Failed to load {dataset_name}: {e}")
-        print("Falling back to wikitext-2-raw-v1")
-        dataset = load_dataset("wikitext", "wikitext-2-raw-v1")
+        # Apply sample limits
+        if max_train_samples and len(dataset["train"]) > max_train_samples:
+            dataset["train"] = dataset["train"].select(range(max_train_samples))
+        if max_val_samples and "validation" in dataset:
+            if len(dataset["validation"]) > max_val_samples:
+                dataset["validation"] = dataset["validation"].select(
+                    range(max_val_samples)
+                )
 
     # Apply NIAH injection if enabled
     if niah_ratio > 0:

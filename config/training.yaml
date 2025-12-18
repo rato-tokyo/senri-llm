@@ -2,11 +2,10 @@
 # 学習ハイパーパラメータの設定
 
 # Dataset settings
+# PG19 (Project Gutenberg books) for long-context training per HSA paper
 dataset:
-  # Options: "pg19" (long books), "wikitext" (short articles)
-  # pg19 is recommended for long-context training
   name: "pg19"
-  config: null  # Only used for wikitext (e.g., "wikitext-2-raw-v1")
+  config: null  # Optional, for generic datasets only
 
   # Context length must exceed SWA window (1024) to train memory
   # 2048 tokens ensures memory is actively used during training

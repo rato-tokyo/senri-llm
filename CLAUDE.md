@@ -52,6 +52,54 @@ Senriの目標は**コンテキスト記憶能力の証明**であり、複雑�
   → メモリが積極的に使用される
 ```
 
+## Training Data Strategy - 重要
+
+### データセット: PG19（長編書籍）
+
+HSA論文の知見に基づき、**実効コンテキスト長が長いデータ**を使用する。
+
+| 項目 | WikiText-2 | PG19 |
+|------|-----------|------|
+| 平均長 | 数百トークン | 数万トークン |
+| 長距離依存 | ほぼなし | キャラクター追跡、伏線 |
+| 用途 | 短文テスト | **長文コンテキスト学習** |
+
+### NIAH（Needle-in-a-Haystack）タスク混入
+
+HSA論文 Section 3.2:
+> "Synthetic ruler tasks are randomly inserted into **1% of training samples**"
+
+```yaml
+# config/training.yaml
+dataset:
+  name: "pg19"
+  niah_ratio: 0.01  # 1%のNIAHタスク混入
+```
+
+NIAHタスクの形式:
+```
+[長い文章...]
+The secret key is: KEY-ABC12345
+[さらに長い文章...]
+
+Question: What is the secret key mentioned above?
+Answer: KEY-ABC12345
+```
+
+### HSA論文からの学び
+
+1. **実効コンテキスト長が汎化に決定的**
+   - 単に長いシーケンスではなく、前半を参照しないと後半が理解できない構造が必要
+   - 学習データの実効長 > 32K で外挿性能が大幅改善
+
+2. **SWA/メモリのシーソー効果**
+   - 大きすぎるSWA窓 → メモリの学習が阻害される
+   - 現在の設定（SWA=1024, 学習長=2048）は適切
+
+3. **Warm-upは事前学習済みモデルでは不要**
+   - HSAのWarm-upはゼロからの学習用
+   - SmolLMは既に学習済みなので、直接長文データで学習可能
+
 ## Architecture Specification
 
 ### Core Concept

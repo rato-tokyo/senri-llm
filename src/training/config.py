@@ -11,10 +11,10 @@ class TrainingConfig:
     model_name: str = "HuggingFaceTB/SmolLM-135M"
     output_dir: str = "./outputs"
 
-    # Dataset
-    dataset_name: str = "wikitext"
-    dataset_config: str = "wikitext-2-raw-v1"
-    max_length: int = 512
+    # Dataset (default: PG19 for long-context training)
+    dataset_name: str = "pg19"
+    dataset_config: str = ""  # Optional, used for generic datasets
+    max_length: int = 2048
 
     # Training hyperparameters
     num_epochs: int = 3

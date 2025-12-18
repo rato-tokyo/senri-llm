@@ -86,6 +86,33 @@ memory_output = Σ_{i ∈ selected} softmax(scores[i]) * (M_i @ q) / (z_i^T @ q 
 output = memory_output + local_attention_output
 ```
 
+## Training Data
+
+### PG19 (Project Gutenberg Books)
+
+HSA論文の知見に基づき、**実効コンテキスト長が長いデータ**を使用。
+
+```yaml
+# config/training.yaml
+dataset:
+  name: "pg19"               # 長編書籍データセット
+  niah_ratio: 0.01           # 1%のNIAHタスク混入
+  max_train_samples: 1000    # サンプル制限（高速実験用）
+```
+
+### NIAH (Needle-in-a-Haystack) Task Injection
+
+HSA論文 Section 3.2: 学習サンプルの1%にNIAHタスクを混入し、長距離検索能力を強化。
+
+```
+[長い文章...]
+The secret key is: KEY-ABC12345
+[さらに長い文章...]
+
+Question: What is the secret key mentioned above?
+Answer: KEY-ABC12345
+```
+
 ## Hyperparameters
 
 | パラメータ | デフォルト値 | 説明 |
@@ -95,6 +122,7 @@ output = memory_output + local_attention_output
 | `top_k_memories` | 64 | 推論時に選択するメモリ数 |
 | `num_memory_layers` | 2 | Senri Memoryを持つレイヤー数 |
 | `memory_layer_interval` | 10 | メモリレイヤー間のインターバル |
+| `niah_ratio` | 0.01 | NIAHタスク混入率 |
 
 ## Project Structure
 

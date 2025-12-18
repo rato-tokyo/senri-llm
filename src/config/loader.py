@@ -1,7 +1,7 @@
 """Configuration loader for Senri-LLM."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, Optional
 
 import yaml  # type: ignore[import-untyped]
 
