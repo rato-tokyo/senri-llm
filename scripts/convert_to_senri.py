@@ -66,24 +66,28 @@ def convert_layer_weights(
     ]
 
     # Attention weights - Q, K, V, O projections
-    converted[f"{prefix}.self_attn.q_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.q_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.k_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.k_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.v_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.v_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.o_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.o_proj.weight"
-    ]
+    # For memory layers, SenriAttention uses [hidden_size, hidden_size] projections
+    # which are incompatible with base model's GQA projections.
+    # Memory layer projections will be randomly initialized (not copied).
+    if not has_memory:
+        converted[f"{prefix}.self_attn.q_proj.weight"] = base_state_dict[
+            f"{prefix}.self_attn.q_proj.weight"
+        ]
+        converted[f"{prefix}.self_attn.k_proj.weight"] = base_state_dict[
+            f"{prefix}.self_attn.k_proj.weight"
+        ]
+        converted[f"{prefix}.self_attn.v_proj.weight"] = base_state_dict[
+            f"{prefix}.self_attn.v_proj.weight"
+        ]
+        converted[f"{prefix}.self_attn.o_proj.weight"] = base_state_dict[
+            f"{prefix}.self_attn.o_proj.weight"
+        ]
 
-    # Handle biases if present (SmolLM doesn't have attention biases, but some models do)
-    for proj in ["q_proj", "k_proj", "v_proj"]:
-        bias_key = f"{prefix}.self_attn.{proj}.bias"
-        if bias_key in base_state_dict:
-            converted[bias_key] = base_state_dict[bias_key]
+        # Handle biases if present (SmolLM doesn't have attention biases, but some models do)
+        for proj in ["q_proj", "k_proj", "v_proj"]:
+            bias_key = f"{prefix}.self_attn.{proj}.bias"
+            if bias_key in base_state_dict:
+                converted[bias_key] = base_state_dict[bias_key]
 
     return converted
 
