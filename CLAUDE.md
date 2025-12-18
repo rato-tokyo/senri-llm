@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-Senri-LLMは、**SmolLM-135M**をベースに、直交基底ルーティングによるInfini Attentionを実装するプロジェクトです。
+Senri-LLMは、**SmolLM-135M**をベースに、Infini Attentionを実装するプロジェクトです。
+
+**現在のステータス**: シンプル化フェーズ（単一テンソル積メモリで基本動作を確認中）
 
 ## Small Model Philosophy - 重要
 
@@ -12,8 +14,7 @@ Senriアーキテクチャは、**コンテキスト長に関係なく固定サ�
 
 ```python
 # メモリサイズは固定（コンテキスト長に依存しない）
-M = torch.zeros(batch, heads, head_dim, head_dim)  # 学習時
-M = torch.zeros(batch, heads, hidden_size, head_dim, head_dim)  # 推論時
+M = torch.zeros(batch, heads, head_dim, head_dim)  # 学習・推論共通
 ```
 
 これにより、**たとえ16M tokensのコンテキストであっても**、最終的には：
@@ -102,12 +103,15 @@ Answer: KEY-ABC12345
 
 ## Architecture Specification
 
-### Core Concept
+### Core Concept（現在: シンプル化版）
 
 ```
-学習時: 通常のInfini Attention（単一テンソル積メモリ）
-推論時: 直交基底ベースの動的テンソル積選択
+学習時・推論時: 同じ単一テンソル積メモリ（標準Infini Attention）
+
+将来: 直交基底ベースの動的テンソル積選択（推論時のみ）
 ```
+
+**シンプル化の理由**: まず基本的なInfini Attentionが正しく動作することを確認する
 
 ### Base Model: SmolLM-135M
 
@@ -166,88 +170,30 @@ Layer 12, 16, 20: SharedSenriMemory (共有)
 - **SWA (Local Attention)**: RoPE使用
 - **Senri Memory (Global Attention)**: NoPE (No Positional Encoding)
 
-## Training vs Inference Mode - 重要
+## Training vs Inference Mode（現在: シンプル化版）
 
-**Senriは `model.train()` と `model.eval()` で挙動が大きく異なる。**
+**現在のシンプル化版では、学習・推論で同じメモリを使用。**
 
-### 比較表
+### 比較表（シンプル化版）
 
 | 項目 | 学習時 (`model.train()`) | 推論時 (`model.eval()`) |
 |------|-------------------------|------------------------|
-| **メモリ構造** | 単一テンソル積メモリ (`TensorMemory`) | 複数メモリ + 直交基底ルーティング (`OrthogonalBasisMemory`) |
-| **メモリ形状** | `[batch, heads, head_dim, head_dim]` | `[batch, heads, hidden_size, head_dim, head_dim]` |
-| **メモリ更新** | 単純累積: `M = M + v ⊗ k` | Delta rule: `M = M + (v - retrieve(k)) ⊗ k` |
-| **Key割り当て** | なし（全てのKVが同一メモリへ） | 基底ルーティング: `argmax(|k|)` で分散 |
-| **Query検索** | 全メモリから一括検索 | Top-k メモリ選択 + 重み付き統合 |
+| **メモリ構造** | 単一テンソル積メモリ (`TensorMemory`) | 同じ |
+| **メモリ形状** | `[batch, heads, head_dim, head_dim]` | 同じ |
+| **メモリ更新** | 単純累積: `M = M + v ⊗ k` | 同じ |
 | **勾配計算** | あり | なし (`torch.no_grad()`) |
-| **目的** | 重要度の学習、パラメータ更新 | 効率的な長文処理、重複除去 |
-
-### 詳細説明
-
-#### 1. メモリ構造の違い
-
-```python
-# 学習時: 単一メモリ
-M = torch.zeros(batch, heads, head_dim, head_dim)
-
-# 推論時: hidden_size 個の独立メモリ
-M = torch.zeros(batch, heads, hidden_size, head_dim, head_dim)
-```
-
-**理由**: 推論時は超長文を扱うため、単一メモリでは情報が混在しすぎる。直交基底でメモリを分割し、関連情報のみを検索。
-
-#### 2. メモリ更新の違い
-
-```python
-# 学習時: 単純累積（勾配を流すため）
-M = M + outer(v, k)
-
-# 推論時: Delta rule（重複除去）
-v_existing = retrieve(k)      # 既存値を取得
-v_delta = v - v_existing      # 差分を計算
-M = M + outer(v_delta, k)     # 差分のみ追加
-```
-
-**理由**:
-- 学習時は勾配が必要なため、シンプルな累積
-- 推論時は同じ情報の重複蓄積を防ぎ、メモリ効率を向上
-
-#### 3. Key-Valueの割り当て
-
-```python
-# 学習時: 全KVが同一メモリへ
-memory.update(keys, values)  # 単一Mへ追加
-
-# 推論時: 直交基底で分散
-basis_idx = keys.abs().argmax(dim=-1)  # 最大絶対値の次元
-# 各KVペアは対応する基底のメモリへ
-```
-
-**理由**: 推論時は情報を意味的に分離し、検索時に関連メモリのみを参照
-
-#### 4. Query検索の違い
-
-```python
-# 学習時: 全メモリから検索
-output = (M @ q) / (z.T @ q + eps)
-
-# 推論時: Top-k選択 + 重み付き統合
-scores = queries.abs()
-top_k_indices = scores.topk(k=top_k_memories).indices
-output = weighted_sum(retrieve_from_each(top_k_indices))
-```
-
-**理由**: 推論時は関連性の高いメモリのみを使用し、計算効率と精度を両立
+| **メモリリセット** | 毎サンプル（自動） | 各シーケンス開始前（手動） |
 
 ### モード切り替えの注意点
 
 ```python
-# 正しい使用方法
-model.train()   # 学習モード: TensorMemory使用
-model.eval()    # 推論モード: OrthogonalBasisMemory + Delta rule
+# 学習時: 自動的に毎サンプルでメモリリセット
+model.train()
 
-# メモリの状態は内部で自動的に切り替わる
-# SenriMemory.training フラグで制御
+# 推論時: 各シーケンス前に手動でリセット
+model.eval()
+model.reset_memory(batch_size, device, dtype)
+outputs = model.generate(**inputs)
 ```
 
 ### メモリリセットのタイミング - 重要
@@ -269,15 +215,11 @@ def forward(self, ...):
 ```python
 # ✅ 正しい: 条件付きリセット
 def forward(self, ...):
-    current_memory = (
-        self.memory.training_memory if self.training
-        else self.memory._inference_memory
-    )
+    M = self.memory.memory.M  # TensorMemoryのM
     needs_reset = (
-        current_memory is None
-        or current_memory.M is None
+        M is None
         or self.training  # 学習時は毎回リセット（サンプル独立）
-        or current_memory.M.shape[0] != batch_size  # バッチサイズ変更時
+        or M.shape[0] != batch_size  # バッチサイズ変更時
     )
     if needs_reset:
         self.memory.reset(batch_size, device, dtype)
@@ -309,72 +251,29 @@ outputs = model.generate(**inputs)
 2. **評価コードは明示的にリセット**: 各テストケース前に`reset_memory()`を呼ぶ
 3. **学習時は毎回リセット**: 各サンプルの独立性を保証
 
-### なぜ学習/推論で異なる戦略を使うのか？
-
-1. **学習時の要件**:
-   - 勾配を計算可能な形式が必要
-   - シンプルな構造で安定した学習
-   - 短いコンテキストで十分（学習データは通常512〜4K tokens）
-
-2. **推論時の要件**:
-   - 超長文（16M+ tokens）を効率的に処理
-   - 重複情報の蓄積を防止
-   - 関連情報のみを高速に検索
-
 ## Implementation Details
 
-### Tensor Memory
+### Tensor Memory（単一メモリ、学習・推論共通）
 
 ```python
-# 学習時（単一メモリ）
+# メモリ構造
 M = torch.zeros(batch, heads, head_dim, head_dim)  # テンソル積
 z = torch.zeros(batch, heads, head_dim)            # 正規化係数
 
-# 更新
-M = M + torch.einsum('bhd,bhe->bhde', v, k)
-z = z + k.sum(dim=seq)
+# 更新: M = Σ v ⊗ k
+M = M + torch.einsum('bhsd,bhse->bhde', v, k)  # 外積の累積
+z = z + k.sum(dim=seq)  # 正規化用
 
-# 検索
-output = torch.einsum('bhde,bhe->bhd', M, q) / (z @ q + eps)
+# 検索: output = (M @ q) / (z^T @ q + eps)
+numerator = torch.einsum('bhde,bhse->bhsd', M, q)
+denominator = torch.einsum('bhd,bhsd->bhs', z, q) + eps
+output = numerator / denominator.unsqueeze(-1)
 ```
 
-```python
-# 推論時（複数メモリ + Delta Rule）
-M = torch.zeros(batch, heads, hidden_dim, head_dim, head_dim)  # 基底ごと
-z = torch.zeros(batch, heads, hidden_dim, head_dim)
-
-# keyの割り当て（単位行列基底なので、最大絶対値の次元）
-basis_idx = k.abs().argmax(dim=-1)  # [batch, seq]
-
-# Delta Rule による更新（推論時のみ）
-# 既存の情報を差し引いてから新しい情報を追加
-v_existing = (M @ k) / (z^T @ k + eps)  # メモリから取得
-v_delta = v - v_existing                 # 差分を計算
-M = M + v_delta ⊗ k                      # 差分のみ追加
-
-# top-k選択
-scores = q.abs()  # [batch, heads, seq, head_dim]
-top_k_indices = scores.topk(k=top_k_memories, dim=-1).indices
-```
-
-### Delta Rule（推論時のみ）
-
-**目的**: 重複情報の蓄積を防ぎ、メモリ効率と検索精度を向上
-
-**学習時 vs 推論時**:
-- **学習時**: 単純累積（勾配が流れ、重要度を学習）
-- **推論時**: Delta rule（重複除去、効率的なメモリ利用）
-
-```python
-# Delta rule の数式
-delta = v - retrieve(k)    # 新しい値 - 既存の値
-M = M + outer(delta, k)    # 差分のみをメモリに追加
-```
-
-**利点**:
-1. 同じ情報の重複蓄積を防止
-2. メモリ容量の効率的な利用
-3. 検索時のノイズ低減
+**テンソル積の意味**:
+- `v ⊗ k` は value と key の外積
+- key を query として検索すると、対応する value が返る
+- 複数の KV ペアを累積することで、連想メモリとして機能
 
 ### SVD-based Memory Cleaning (Noise Removal)
 
@@ -406,7 +305,6 @@ print(f"Energy retained: {stats.energy_retained:.2%}")
 |-----------|-----|----------|------|
 | `energy_threshold` | float | 0.95 | 保持するエネルギーの割合（特異値の二乗和） |
 | `max_rank` | int | None | 明示的なランク上限。Noneの場合はenergy_thresholdで決定 |
-| `basis_indices` | List[int] | None | (推論時のみ) クリーニングする基底インデックス |
 
 **実行タイミング（未定、将来実装予定）**:
 - ユーザー入力待機中（アイドル時）
@@ -422,8 +320,6 @@ stats = memory.svd_cleaning(energy_threshold=0.90)
 # 特異値の分布を確認（デバッグ用）
 print(f"Top singular values: {stats.singular_values_before[0, :5]}")
 
-# OrthogonalBasisMemory（推論時）の場合
-# stats.per_basis_stats で各基底の詳細統計を取得可能
 ```
 
 **注意事項**:
@@ -448,27 +344,21 @@ class SenriConfig(LlamaConfig):
     # Senri specific
     sliding_window_size: int = 1024
     chunk_size: int = 64
-    top_k_memories: int = 64
     num_memory_layers: int = 2
     first_memory_layer: int = 10
     memory_layer_interval: int = 10
 
-# src/memory/tensor_memory.py
+# src/memory/base_memory.py
 class TensorMemory:
-    """単一テンソル積メモリ（学習用）"""
+    """単一テンソル積メモリ（学習・推論共通）"""
 
-class OrthogonalBasisMemory:
-    """直交基底ベースの複数テンソル積メモリ（推論用）"""
+# src/memory/senri_memory.py
+class SenriMemory:
+    """TensorMemoryのラッパー（将来の拡張用）"""
 
 # src/attention/senri_attention.py
 class SenriAttention(nn.Module):
-    """SWA + Senri Memory Attention"""
-
-    def forward(self, hidden_states, ...):
-        if self.training:
-            return self._forward_training(...)  # 単一メモリ
-        else:
-            return self._forward_inference(...)  # 直交基底ルーティング
+    """SWA + Senri Memory Attention（単一メモリ版）"""
 ```
 
 ## Configuration Management Policy
@@ -575,9 +465,8 @@ def forward(
 
 ### Test Cases
 1. `TensorMemory`: 更新と検索の正確性
-2. `OrthogonalBasisMemory`: 基底割り当ての正確性
-3. `SenriAttention`: 学習/推論モードの切り替え
-4. `SenriForCausalLM`: SmolLM重みのロード
+2. `SenriAttention`: メモリリセットの動作
+3. `SenriForCausalLM`: SmolLM重みのロード
 
 ### Shape Tests
 ```python
@@ -619,8 +508,8 @@ Types: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`
 - `torch.no_grad()`の適切な使用
 
 ### Computational Efficiency
-- 直交基底が単位行列なので、射影計算が単純なインデックス参照に簡略化
-- Top-k選択は効率的な`torch.topk`使用
+- テンソル積メモリは O(d²) のメモリで任意長のシーケンスを処理可能
+- SWAはウィンドウサイズ内のみ計算するため O(n・w) の計算量
 
 ## Dependencies
 
@@ -644,11 +533,11 @@ self.memory_history.append(memory.detach().clone())
 
 ### 2. 学習/推論モード混同
 ```python
-# 必ずモードを明示的に確認
+# モードによるメモリリセットの違いに注意
 if self.training:
-    # 単一メモリ
+    # 毎サンプル自動リセット
 else:
-    # 直交基底ルーティング
+    # 手動リセットが必要
 ```
 
 ### 3. 位置エンコーディングの混在

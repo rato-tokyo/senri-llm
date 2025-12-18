@@ -1,13 +1,17 @@
-"""Unified Senri memory interface switching between training and inference modes."""
+"""Simplified Senri memory using single tensor product memory.
+
+This is a simplified version that uses the same TensorMemory for both
+training and inference. The orthogonal basis routing is removed for now
+to ensure basic functionality works correctly.
+"""
 
 from dataclasses import dataclass
-from typing import List, Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
 from .base_memory import SVDCleaningStats, TensorMemory
-from .orthogonal_memory import OrthogonalBasisMemory, OrthogonalSVDCleaningStats
 
 
 @dataclass
@@ -30,20 +34,22 @@ class MemoryHealthStats:
 
 class SenriMemory(nn.Module):
     """
-    Unified memory interface that switches between training and inference modes.
+    Simplified memory using single tensor product memory.
 
-    Training: Uses TensorMemory (single memory, standard Infini Attention)
-    Inference: Uses OrthogonalBasisMemory (multiple memories with basis routing)
+    Both training and inference use the same TensorMemory:
+    M = Σ v ⊗ k (outer product accumulation)
+    z = Σ k (normalization term)
+    Retrieval: output = (M @ q) / (z^T @ q + eps)
 
-    Memory is lazily initialized to avoid allocating inference memory during training.
+    This is standard Infini Attention without orthogonal basis routing.
     """
 
     def __init__(
         self,
         num_heads: int,
         head_dim: int,
-        hidden_size: int,
-        top_k: int = 64,
+        hidden_size: int,  # Kept for API compatibility, but unused
+        top_k: int = 64,  # Kept for API compatibility, but unused
         eps: float = 1e-6,
     ):
         """
@@ -52,88 +58,72 @@ class SenriMemory(nn.Module):
         Args:
             num_heads: Number of attention heads.
             head_dim: Dimension per head.
-            hidden_size: Hidden size (number of basis vectors for inference).
-            top_k: Number of memories to select during inference.
+            hidden_size: (Unused) Kept for API compatibility.
+            top_k: (Unused) Kept for API compatibility.
             eps: Epsilon for numerical stability.
         """
         super().__init__()
 
-        # Store config for lazy initialization
         self.num_heads = num_heads
         self.head_dim = head_dim
-        self.hidden_size = hidden_size
-        self.top_k = top_k
+        self.hidden_size = hidden_size  # Store but don't use
+        self.top_k = top_k  # Store but don't use
         self.eps = eps
 
-        # Training memory is always needed (small: [batch, heads, head_dim, head_dim])
-        self.training_memory = TensorMemory(num_heads, head_dim, eps)
+        # Single tensor product memory for both training and inference
+        self.memory = TensorMemory(num_heads, head_dim, eps)
 
-        # Inference memory is lazily initialized only when needed (large memory)
-        self._inference_memory: Optional[OrthogonalBasisMemory] = None
-
-    @property
-    def inference_memory(self) -> OrthogonalBasisMemory:
-        """Lazily create inference memory only when needed."""
-        if self._inference_memory is None:
-            self._inference_memory = OrthogonalBasisMemory(
-                self.num_heads, self.head_dim, self.hidden_size, self.top_k, self.eps
-            )
-        return self._inference_memory
+        # For backward compatibility with code that checks these attributes
+        self.training_memory = self.memory
+        self._inference_memory = self.memory
 
     def reset(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        """Reset appropriate memory based on training mode."""
-        if self.training:
-            # Only reset training memory during training to save GPU memory
-            self.training_memory.reset(batch_size, device, dtype)
-        else:
-            # Reset inference memory during inference (lazy init if needed)
-            self.inference_memory.reset(batch_size, device, dtype)
+        """Reset memory state for new sequence."""
+        self.memory.reset(batch_size, device, dtype)
 
     def update(self, keys: torch.Tensor, values: torch.Tensor):
-        """Update appropriate memory based on training mode."""
-        if self.training:
-            self.training_memory.update(keys, values)
-        else:
-            self.inference_memory.update(keys, values)
+        """
+        Update memory with new key-value pairs.
+
+        Args:
+            keys: [batch, heads, seq, head_dim]
+            values: [batch, heads, seq, head_dim]
+        """
+        self.memory.update(keys, values)
 
     def retrieve(self, queries: torch.Tensor) -> torch.Tensor:
-        """Retrieve from appropriate memory based on training mode."""
-        if self.training:
-            return self.training_memory.retrieve(queries)
-        else:
-            return self.inference_memory.retrieve(queries)
+        """
+        Retrieve from memory using queries.
+
+        Args:
+            queries: [batch, heads, seq, head_dim]
+
+        Returns:
+            output: [batch, heads, seq, head_dim]
+        """
+        return self.memory.retrieve(queries)
 
     def svd_cleaning(
         self,
         energy_threshold: float = 0.95,
         max_rank: Optional[int] = None,
-        basis_indices: Optional[List[int]] = None,
-    ) -> Union[SVDCleaningStats, OrthogonalSVDCleaningStats]:
+        basis_indices=None,  # Ignored, kept for API compatibility
+    ) -> SVDCleaningStats:
         """
-        Perform SVD-based noise removal on the memory matrices.
-
-        This is a unified interface that delegates to the appropriate memory
-        based on training mode.
+        Perform SVD-based noise removal on the memory matrix.
 
         Args:
             energy_threshold: Fraction of total energy to retain. Default 0.95.
             max_rank: Maximum rank to retain. If None, determined by energy_threshold.
-            basis_indices: (Inference only) List of basis indices to clean.
+            basis_indices: (Ignored) Kept for API compatibility.
 
         Returns:
-            SVDCleaningStats (training) or OrthogonalSVDCleaningStats (inference).
+            SVDCleaningStats with information about the cleaning operation.
         """
-        if self.training:
-            return self.training_memory.svd_cleaning(
-                energy_threshold=energy_threshold,
-                max_rank=max_rank,
-            )
-        else:
-            return self.inference_memory.svd_cleaning(
-                energy_threshold=energy_threshold,
-                max_rank=max_rank,
-                basis_indices=basis_indices,
-            )
+        return self.memory.svd_cleaning(
+            energy_threshold=energy_threshold,
+            max_rank=max_rank,
+        )
 
     def check_health(
         self,
@@ -142,25 +132,14 @@ class SenriMemory(nn.Module):
         """
         Check memory health and determine if cleaning is needed.
 
-        This computes metrics about the memory state without modifying it.
-        Use this to decide when to call svd_cleaning().
-
         Args:
             rank_threshold: If rank_ratio exceeds this, cleaning is recommended.
 
         Returns:
             MemoryHealthStats with metrics and recommendation.
         """
-        # Get the active memory based on mode
-        if self.training:
-            M = self.training_memory.M
-            z = self.training_memory.z
-            eps = self.training_memory.eps
-        else:
-            # For inference, aggregate across all basis memories
-            M = self.inference_memory.M
-            z = self.inference_memory.z
-            eps = self.inference_memory.eps
+        M = self.memory.M
+        z = self.memory.z
 
         if M is None or z is None:
             return MemoryHealthStats(
@@ -179,27 +158,17 @@ class SenriMemory(nn.Module):
             normalizer_norm = z.norm().item()
 
             # Compute effective rank via SVD
-            if self.training:
-                # M: [batch, heads, head_dim, head_dim]
-                batch_size, num_heads, d1, d2 = M.shape
-                M_reshaped = M.view(batch_size * num_heads, d1, d2)
-            else:
-                # M: [batch, heads, hidden_size, head_dim, head_dim]
-                batch_size, num_heads, hidden_size, d1, d2 = M.shape
-                # Reshape to compute SVD across all basis memories
-                M_reshaped = M.view(batch_size * num_heads * hidden_size, d1, d2)
+            batch_size, num_heads, d1, d2 = M.shape
+            M_reshaped = M.view(batch_size * num_heads, d1, d2)
 
-            # SVD to get singular values
             try:
                 S = torch.linalg.svdvals(M_reshaped)
-                # Count significant singular values (> eps)
-                effective_rank = (S > eps).float().sum(dim=-1).mean().item()
+                effective_rank = (S > self.eps).float().sum(dim=-1).mean().item()
                 max_rank = min(d1, d2)
                 rank_ratio = effective_rank / max_rank
             except RuntimeError:
-                # SVD failed (e.g., memory too large)
                 effective_rank = 0.0
-                max_rank = min(d1, d2) if "d1" in dir() else 0
+                max_rank = min(d1, d2)
                 rank_ratio = 0.0
 
             # Determine if cleaning is needed
@@ -208,7 +177,7 @@ class SenriMemory(nn.Module):
                 reason = f"Rank ratio {rank_ratio:.2%} exceeds threshold {rank_threshold:.0%}"
             elif rank_ratio > rank_threshold * 0.8:
                 reason = f"Rank ratio {rank_ratio:.2%} approaching threshold"
-                needs_cleaning = False  # Warning but not critical
+                needs_cleaning = False
             else:
                 reason = f"Memory healthy (rank ratio {rank_ratio:.2%})"
 
@@ -226,11 +195,9 @@ class SenriMemory(nn.Module):
         self,
         rank_threshold: float = 0.85,
         energy_threshold: float = 0.95,
-    ) -> Optional[Union[SVDCleaningStats, OrthogonalSVDCleaningStats]]:
+    ) -> Optional[SVDCleaningStats]:
         """
         Check health and perform cleaning if needed.
-
-        Convenience method that combines check_health() and svd_cleaning().
 
         Args:
             rank_threshold: Trigger cleaning if rank_ratio exceeds this.

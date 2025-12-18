@@ -1,4 +1,4 @@
-"""Senri Attention implementation combining SWA and Infini Attention with orthogonal basis routing."""
+"""Senri Attention implementation combining SWA and Infini Attention (simplified single memory)."""
 
 from typing import Optional, Tuple
 
@@ -16,8 +16,8 @@ class SenriAttention(nn.Module):
     - Sliding Window Attention (SWA) with RoPE for local context
     - Infini Attention memory (NoPE) for global context
 
-    Training: Uses single tensor product memory (standard Infini Attention)
-    Inference: Uses orthogonal basis routed multiple memories
+    Both training and inference use a single tensor product memory.
+    This is standard Infini Attention without orthogonal basis routing.
     """
 
     def __init__(
@@ -273,16 +273,11 @@ class SenriAttention(nn.Module):
         # 1. Memory is not initialized (M is None)
         # 2. During training (each sample should be independent)
         # 3. Batch size changed
-        current_memory = (
-            self.memory.training_memory
-            if self.training
-            else self.memory._inference_memory
-        )
+        M = self.memory.memory.M  # Access underlying TensorMemory
         needs_reset = (
-            current_memory is None
-            or current_memory.M is None
+            M is None
             or self.training
-            or current_memory.M.shape[0] != batch_size
+            or M.shape[0] != batch_size
         )
         if needs_reset:
             self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
