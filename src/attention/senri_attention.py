@@ -134,9 +134,9 @@ class SenriAttention(nn.Module):
 
         Args:
             q: [batch, heads, seq, head_dim]
-            k: [batch, heads, seq, head_dim]
-            cos: [seq, head_dim]
-            sin: [seq, head_dim]
+            k: [batch, kv_heads, seq, head_dim]
+            cos: [batch, seq, head_dim] (from SenriRotaryEmbedding)
+            sin: [batch, seq, head_dim] (from SenriRotaryEmbedding)
             position_ids: Optional position IDs.
 
         Returns:
@@ -149,9 +149,10 @@ class SenriAttention(nn.Module):
             x2 = x[..., x.shape[-1] // 2 :]
             return torch.cat((-x2, x1), dim=-1)
 
-        # Expand cos/sin for batch and heads
-        cos = cos.unsqueeze(0).unsqueeze(0)  # [1, 1, seq, head_dim]
-        sin = sin.unsqueeze(0).unsqueeze(0)
+        # cos/sin from SenriRotaryEmbedding: [batch, seq, head_dim]
+        # Need to expand for heads: [batch, 1, seq, head_dim]
+        cos = cos.unsqueeze(1)  # [batch, 1, seq, head_dim]
+        sin = sin.unsqueeze(1)  # [batch, 1, seq, head_dim]
 
         q_embed = (q * cos) + (rotate_half(q) * sin)
         k_embed = (k * cos) + (rotate_half(k) * sin)
