@@ -19,36 +19,40 @@ Senriは、Infini AttentionとHSA (Hierarchical Sparse Attention) の概念を�
 ## Architecture
 
 ### Base Model
-- **Qwen2.5-0.5B** (Apache 2.0 License)
-  - Hidden size: 896
-  - Layers: 24
-  - Attention heads: 14
-  - KV heads: 2 (GQA)
+- **SmolLM-135M** (Apache 2.0 License)
+  - Hidden size: 576
+  - Layers: 30
+  - Attention heads: 9
+  - KV heads: 3 (GQA)
+  - Head dim: 64
+
+### Small Model Philosophy
+
+Senriアーキテクチャは**コンテキスト長に関係なく固定サイズのメモリ**を使用します：
+
+```python
+M = torch.zeros(batch, heads, head_dim, head_dim)  # 学習時: ~0.1MB/層
+M = torch.zeros(batch, heads, hidden_size, head_dim, head_dim)  # 推論時
+```
+
+**理論上は小型モデルでも超長文コンテキストを処理可能**です。
 
 ### Layer Configuration
 
-HSA論文に倣い、以下の構成を採用：
-
 ```
-Lower Decoder (Layer 0-11): SWA only
-Upper Decoder (Layer 12-23):
-  - Layer 12: SWA + Senri Memory (Group 1)
-  - Layer 13-15: SWA only
-  - Layer 16: SWA + Senri Memory (Group 2)
-  - Layer 17-19: SWA only
-  - Layer 20: SWA + Senri Memory (Group 3)
-  - Layer 21-23: SWA only
+Layer 0-9:   SWA only (Lower Decoder)
+Layer 10:    SWA + Senri Memory (Group 1)
+Layer 11-19: SWA only
+Layer 20:    SWA + Senri Memory (Group 2)
+Layer 21-29: SWA only
 ```
-
-- **Lower Decoder**: 全レイヤーがSliding Window Attention (SWA) のみ
-- **Upper Decoder**: Gグループに分割、各グループの最初の1層のみSWA + Senri Memory
 
 ### Senri Memory Mechanism
 
 #### 1. 直交基底ベクトル（固定）
 ```
 B = I ∈ R^(d×d)  (単位行列 = 標準直交基底)
-d = hidden_size = 896
+d = hidden_size = 576
 ```
 
 #### 2. テンソル積メモリ
@@ -65,18 +69,14 @@ assignment(k) = argmax_i |<k, b_i>|
 assignment(k) = argmax_i |k_i|
 ```
 
-#### 4. メモリ更新タイミング
-- SWAウィンドウが満杯になった時
-- シーケンス終了時
-
-#### 5. Query→メモリ選択（推論時のみ）
+#### 4. Query→メモリ選択（推論時のみ）
 ```python
 # queryとの類似度でtop-kメモリを選択
 scores = [|<q, b_i>| for i in 1..d]
 selected = top_k(scores, k=top_k_memories)
 ```
 
-#### 6. 出力計算
+#### 5. 出力計算
 ```python
 # 学習時
 output = (M @ q) / (z^T @ q + eps) + local_attention_output
@@ -90,11 +90,11 @@ output = memory_output + local_attention_output
 
 | パラメータ | デフォルト値 | 説明 |
 |-----------|-------------|------|
-| `sliding_window_size` | 4096 | SWAのウィンドウサイズ |
+| `sliding_window_size` | 1024 | SWAのウィンドウサイズ |
 | `chunk_size` | 64 | メモリ更新のチャンクサイズ |
 | `top_k_memories` | 64 | 推論時に選択するメモリ数 |
-| `num_memory_layers` | 3 | Senri Memoryを持つレイヤー数 |
-| `memory_layer_interval` | 4 | メモリレイヤー間のインターバル |
+| `num_memory_layers` | 2 | Senri Memoryを持つレイヤー数 |
+| `memory_layer_interval` | 10 | メモリレイヤー間のインターバル |
 
 ## Project Structure
 
@@ -102,18 +102,36 @@ output = memory_output + local_attention_output
 senri-llm/
 ├── src/
 │   ├── __init__.py
-│   ├── configuration_senri.py      # SenriConfig (extends Qwen2Config)
+│   ├── configuration_senri.py      # SenriConfig (extends LlamaConfig)
 │   ├── modeling_senri.py           # SenriForCausalLM
+│   ├── decoder.py                  # SenriDecoderLayer
 │   ├── attention/
 │   │   ├── __init__.py
-│   │   ├── senri_attention.py      # Senri Memory Attention
-│   │   └── sliding_window.py       # SWA (Qwen2から流用)
-│   └── memory/
-│       ├── __init__.py
-│       └── tensor_memory.py        # 直交基底ベースのテンソル積メモリ
+│   │   └── senri_attention.py      # Senri Memory Attention
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   ├── base_memory.py          # TensorMemory (学習用)
+│   │   ├── orthogonal_memory.py    # OrthogonalBasisMemory (推論用)
+│   │   └── senri_memory.py         # 統合インターフェース
+│   ├── training/
+│   │   ├── __init__.py
+│   │   ├── trainer.py              # SenriTrainer
+│   │   └── config.py               # TrainingConfig
+│   ├── evaluation/
+│   │   ├── __init__.py
+│   │   ├── niah.py                 # Needle-in-a-Haystack評価
+│   │   └── multi_query.py          # Multi-Query評価
+│   ├── data/
+│   │   └── loader.py               # データセットローダー
+│   └── config/
+│       └── loader.py               # 設定ファイルローダー
 ├── scripts/
-│   ├── convert_qwen_to_senri.py    # Qwen2.5→Senri変換スクリプト
-│   └── train.py                    # 学習スクリプト
+│   ├── convert_to_senri.py         # SmolLM→Senri変換スクリプト
+│   └── colab.py                    # Colab実験スクリプト
+├── config/
+│   ├── model.yaml                  # モデル設定
+│   ├── training.yaml               # 学習設定
+│   └── experiment.yaml             # 実験設定
 ├── tests/
 │   └── test_senri.py
 ├── CLAUDE.md                       # AI開発ガイドライン
@@ -132,16 +150,31 @@ pip install -e .
 
 ### Model Conversion
 ```python
-from src.convert import convert_qwen_to_senri
+from scripts.convert_to_senri import convert_to_senri
 
-model = convert_qwen_to_senri("Qwen/Qwen2.5-0.5B")
+model = convert_to_senri("HuggingFaceTB/SmolLM-135M")
+```
+
+### Training (Google Colab)
+```bash
+# Clone and install
+!git clone https://github.com/YOUR_USERNAME/senri-llm.git
+%cd senri-llm
+!pip install -e .
+
+# Run training
+!python scripts/colab.py train
+```
+
+### Evaluation
+```bash
+!python scripts/colab.py eval
 ```
 
 ### Inference
 ```python
 from src import SenriForCausalLM, SenriConfig
 
-config = SenriConfig.from_pretrained("path/to/senri-model")
 model = SenriForCausalLM.from_pretrained("path/to/senri-model")
 
 # 推論時は自動的に直交基底ルーティングが有効化
@@ -149,7 +182,7 @@ model.eval()
 output = model.generate(input_ids, max_length=100000)
 ```
 
-### Training
+### Training Mode
 ```python
 # 学習時は通常のInfini Attention（単一メモリ）として動作
 model.train()
@@ -169,8 +202,8 @@ loss = output.loss
 
 - [Infini-attention: Infinite Context Transformers with Infinite Attention](https://arxiv.org/abs/2404.07143)
 - [HSA-UltraLong: Every Token Counts: Generalizing 16M Ultra-Long Context](https://arxiv.org/abs/2511.23319)
-- [Qwen2.5 Technical Report](https://arxiv.org/abs/2412.15115)
+- [SmolLM](https://huggingface.co/HuggingFaceTB/SmolLM-135M)
 
 ## License
 
-Apache 2.0 (following Qwen2.5)
+Apache 2.0

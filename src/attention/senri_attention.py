@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..memory import SenriMemory
+from ..modules import SenriRotaryEmbedding
 
 
 class SenriAttention(nn.Module):
@@ -32,6 +33,8 @@ class SenriAttention(nn.Module):
         memory_gate_init: float = 0.0,
         eps: float = 1e-6,
         layer_idx: int = 0,
+        max_position_embeddings: int = 32768,
+        rope_theta: float = 10000.0,
     ):
         """
         Initialize SenriAttention.
@@ -48,6 +51,8 @@ class SenriAttention(nn.Module):
             memory_gate_init: Initial value for memory gate.
             eps: Epsilon for numerical stability.
             layer_idx: Layer index for debugging.
+            max_position_embeddings: Maximum sequence length for RoPE.
+            rope_theta: Base for RoPE frequency computation.
         """
         super().__init__()
 
@@ -69,6 +74,13 @@ class SenriAttention(nn.Module):
         self.k_proj = nn.Linear(hidden_size, num_key_value_heads * head_dim, bias=True)
         self.v_proj = nn.Linear(hidden_size, num_key_value_heads * head_dim, bias=True)
         self.o_proj = nn.Linear(num_attention_heads * head_dim, hidden_size, bias=False)
+
+        # RoPE for local attention
+        self.rotary_emb = SenriRotaryEmbedding(
+            head_dim,
+            max_position_embeddings=max_position_embeddings,
+            base=rope_theta,
+        )
 
         # Memory for global attention (operates on query heads)
         self.memory = SenriMemory(
@@ -208,8 +220,6 @@ class SenriAttention(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        cos: Optional[torch.Tensor] = None,
-        sin: Optional[torch.Tensor] = None,
         past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
@@ -225,8 +235,6 @@ class SenriAttention(nn.Module):
             hidden_states: [batch, seq, hidden_size]
             attention_mask: Attention mask.
             position_ids: Position IDs for RoPE.
-            cos: Cosine for RoPE.
-            sin: Sine for RoPE.
             past_key_value: Cached KV for generation.
             output_attentions: Whether to output attention weights.
             use_cache: Whether to cache KV.
@@ -262,14 +270,11 @@ class SenriAttention(nn.Module):
         self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
 
         # ========== Local Attention (SWA with RoPE) ==========
-        # Apply RoPE to Q, K for local attention
-        if cos is not None and sin is not None:
-            query_local, key_local = self._apply_rotary_pos_emb(
-                query_states, key_states, cos, sin, position_ids
-            )
-        else:
-            query_local = query_states
-            key_local = key_states
+        # Generate RoPE embeddings using internal rotary_emb
+        cos, sin = self.rotary_emb(value_states, position_ids)
+        query_local, key_local = self._apply_rotary_pos_emb(
+            query_states, key_states, cos, sin, position_ids
+        )
 
         # Expand KV for GQA (value_expanded used in memory.update)
         value_expanded = self._repeat_kv(value_states, self.num_key_value_groups)

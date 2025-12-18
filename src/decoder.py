@@ -37,6 +37,8 @@ class SenriDecoderLayer(nn.Module):
                 memory_gate_init=config.memory_gate_init,
                 eps=config.memory_eps,
                 layer_idx=layer_idx,
+                max_position_embeddings=config.max_position_embeddings,
+                rope_theta=config.rope_theta,
             )
         else:
             self.self_attn = SenriStandardAttention(config, layer_idx)

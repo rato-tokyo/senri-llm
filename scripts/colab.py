@@ -183,12 +183,12 @@ def test_memory():
 
 
 def convert_experiment():
-    """Convert Qwen model to Senri."""
+    """Convert base model to Senri."""
     print("=" * 50)
-    print("Converting Qwen to Senri")
+    print("Converting Base Model to Senri")
     print("=" * 50)
 
-    from scripts.convert_qwen_to_senri import convert_qwen_to_senri, verify_conversion
+    from scripts.convert_to_senri import convert_to_senri, verify_conversion
 
     config_manager = ConfigManager()
     model_name = config_manager.base_model_name
@@ -199,7 +199,7 @@ def convert_experiment():
     device = get_device()
     device_str = "cuda" if device.type == "cuda" else "cpu"
 
-    senri_model = convert_qwen_to_senri(
+    senri_model = convert_to_senri(
         model_name=model_name,
         output_dir=output_dir,
         device=device_str,
