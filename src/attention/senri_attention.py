@@ -1,6 +1,5 @@
 """Senri Attention implementation combining SWA and Infini Attention with orthogonal basis routing."""
 
-import math
 from typing import Optional, Tuple
 
 import torch
@@ -263,8 +262,7 @@ class SenriAttention(nn.Module):
             query_local = query_states
             key_local = key_states
 
-        # Expand KV for local attention
-        key_local_expanded = self._repeat_kv(key_local, self.num_key_value_groups)
+        # Expand KV for GQA (value_expanded used in memory.update)
         value_expanded = self._repeat_kv(value_states, self.num_key_value_groups)
 
         local_output = self._sliding_window_attention(

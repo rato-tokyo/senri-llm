@@ -1,7 +1,7 @@
 """Senri model implementation based on Qwen2."""
 
 import math
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -183,6 +183,7 @@ class SenriDecoderLayer(nn.Module):
         self.has_memory = config.is_memory_layer(layer_idx)
 
         # Attention (with or without Senri Memory)
+        self.self_attn: Union[SenriAttention, SenriStandardAttention]
         if self.has_memory:
             self.self_attn = SenriAttention(
                 hidden_size=config.hidden_size,
@@ -237,24 +238,24 @@ class SenriDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
         hidden_states = residual + hidden_states
 
-        outputs = (hidden_states,)
+        outputs: Tuple[torch.Tensor, ...] = (hidden_states,)
 
         if output_attentions:
-            outputs += (attn_weights,)
+            outputs = outputs + (attn_weights,)
 
         if use_cache:
-            outputs += (present_key_value,)
+            outputs = outputs + (present_key_value,)
 
-        return outputs
+        return outputs  # type: ignore[return-value]
 
 
 class SenriPreTrainedModel(PreTrainedModel):
     """Base class for Senri models."""
 
-    config_class = SenriConfig
+    config_class = SenriConfig  # type: ignore[assignment]
     base_model_prefix = "model"
     supports_gradient_checkpointing = True
-    _no_split_modules = ["SenriDecoderLayer"]
+    _no_split_modules = ["SenriDecoderLayer"]  # type: ignore[assignment]
 
     def _init_weights(self, module):
         std = self.config.initializer_range
@@ -300,7 +301,7 @@ class SenriModel(SenriPreTrainedModel):
 
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,
@@ -334,7 +335,7 @@ class SenriModel(SenriPreTrainedModel):
         # Create position IDs
         if position_ids is None:
             past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            position_ids = torch.arange(
+            position_ids = torch.arange(  # type: ignore[assignment]
                 past_seen_tokens, past_seen_tokens + seq_length, dtype=torch.long, device=inputs_embeds.device
             ).unsqueeze(0)
 
@@ -349,13 +350,13 @@ class SenriModel(SenriPreTrainedModel):
 
         hidden_states = inputs_embeds
 
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attns = () if output_attentions else None
+        all_hidden_states: Optional[Tuple[torch.Tensor, ...]] = () if output_hidden_states else None
+        all_self_attns: Optional[Tuple[torch.Tensor, ...]] = () if output_attentions else None
         next_decoder_cache = None
 
         for decoder_layer in self.layers:
-            if output_hidden_states:
-                all_hidden_states += (hidden_states,)
+            if output_hidden_states and all_hidden_states is not None:
+                all_hidden_states = all_hidden_states + (hidden_states,)
 
             layer_outputs = decoder_layer(
                 hidden_states,
@@ -371,13 +372,13 @@ class SenriModel(SenriPreTrainedModel):
             if use_cache:
                 next_decoder_cache = layer_outputs[2 if output_attentions else 1]
 
-            if output_attentions:
-                all_self_attns += (layer_outputs[1],)
+            if output_attentions and all_self_attns is not None:
+                all_self_attns = all_self_attns + (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
 
-        if output_hidden_states:
-            all_hidden_states += (hidden_states,)
+        if output_hidden_states and all_hidden_states is not None:
+            all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
             return tuple(v for v in [hidden_states, next_decoder_cache, all_hidden_states, all_self_attns] if v is not None)
@@ -385,8 +386,8 @@ class SenriModel(SenriPreTrainedModel):
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_decoder_cache,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attns,
+            hidden_states=all_hidden_states,  # type: ignore[arg-type]
+            attentions=all_self_attns,  # type: ignore[arg-type]
         )
 
     def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values):
@@ -405,7 +406,7 @@ class SenriModel(SenriPreTrainedModel):
 class SenriForCausalLM(SenriPreTrainedModel):
     """Senri model with LM head for causal language modeling."""
 
-    _tied_weights_keys = ["lm_head.weight"]
+    _tied_weights_keys = ["lm_head.weight"]  # type: ignore[assignment]
 
     def __init__(self, config: SenriConfig):
         super().__init__(config)
@@ -436,7 +437,7 @@ class SenriForCausalLM(SenriPreTrainedModel):
 
     def forward(
         self,
-        input_ids: torch.LongTensor = None,
+        input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_values: Optional[Cache] = None,

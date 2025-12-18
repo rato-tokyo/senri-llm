@@ -17,21 +17,16 @@ Usage:
 
 import argparse
 import gc
-import json
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import torch
-from transformers import AutoTokenizer, TrainingArguments, Trainer
-from datasets import load_dataset
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.configuration_senri import SenriConfig
-from src.modeling_senri import SenriForCausalLM
 
 
 def clear_memory():
