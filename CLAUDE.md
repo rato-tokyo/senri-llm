@@ -250,6 +250,65 @@ model.eval()    # 推論モード: OrthogonalBasisMemory + Delta rule
 # SenriMemory.training フラグで制御
 ```
 
+### メモリリセットのタイミング - 重要
+
+**⚠️ 2024年12月に発見した重大なバグとその修正**
+
+#### 問題
+
+毎回の`forward()`でメモリをリセットすると、長文推論でメモリが機能しない。
+
+```python
+# ❌ 間違い: 毎回リセット
+def forward(self, ...):
+    self.memory.reset(batch_size, device, dtype)  # 過去の情報が消える！
+```
+
+#### 正しい実装
+
+```python
+# ✅ 正しい: 条件付きリセット
+def forward(self, ...):
+    current_memory = (
+        self.memory.training_memory if self.training
+        else self.memory._inference_memory
+    )
+    needs_reset = (
+        current_memory is None
+        or current_memory.M is None
+        or self.training  # 学習時は毎回リセット（サンプル独立）
+        or current_memory.M.shape[0] != batch_size  # バッチサイズ変更時
+    )
+    if needs_reset:
+        self.memory.reset(batch_size, device, dtype)
+```
+
+#### リセットタイミングの原則
+
+| シナリオ | リセットタイミング | 理由 |
+|---------|-------------------|------|
+| **学習** | 毎サンプル | 各サンプルは独立、勾配の分離 |
+| **推論（短文）** | 毎サンプル | 独立した質問への回答 |
+| **推論（長文）** | シーケンス先頭のみ | メモリに過去情報を蓄積 |
+| **評価（NIAH等）** | 各テスト前 | テスト間の干渉を防止 |
+
+#### 評価コードでの正しい使用
+
+```python
+# NIAH評価など、各テストケース前にリセット
+if hasattr(model, "reset_memory"):
+    model.reset_memory(batch_size, device, dtype)
+
+# その後generate()を呼ぶ
+outputs = model.generate(**inputs)
+```
+
+#### 教訓
+
+1. **メモリリセットは呼び出し側の責任**: 推論時は`forward()`内で自動リセットしない
+2. **評価コードは明示的にリセット**: 各テストケース前に`reset_memory()`を呼ぶ
+3. **学習時は毎回リセット**: 各サンプルの独立性を保証
+
 ### なぜ学習/推論で異なる戦略を使うのか？
 
 1. **学習時の要件**:
@@ -597,6 +656,20 @@ else:
 # SWA: RoPE適用
 # Senri Memory: RoPE適用しない（NoPE）
 ```
+
+### 4. メモリの毎回リセット（致命的）
+```python
+# Bad: 推論時にforward()内で毎回リセット
+def forward(self, ...):
+    self.memory.reset(...)  # ❌ 長文で過去情報が消える
+
+# Good: 条件付きリセット
+def forward(self, ...):
+    if self.training or memory_not_initialized:
+        self.memory.reset(...)  # ✅ 学習時のみ毎回リセット
+```
+
+**症状**: NIAH評価で正答率0%、長文生成で前半の情報を参照できない
 
 ## Debugging Tips
 
