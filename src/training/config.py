@@ -1,7 +1,6 @@
 """Training configuration for Senri-LLM."""
 
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 
 
 @dataclass
