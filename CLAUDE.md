@@ -32,6 +32,29 @@ Layer 21-23: SWA only
 - `memory_layer_interval`: 4 (メモリレイヤー間隔)
 - メモリレイヤーのインデックス: [12, 16, 20]
 
+### Memory Sharing Policy
+
+**現状: 各層が独立したメモリを持つ（Independent Memory）**
+
+```
+Layer 12: SenriMemory_1 (独立)
+Layer 16: SenriMemory_2 (独立)
+Layer 20: SenriMemory_3 (独立)
+```
+
+- 各層が独自の `SenriMemory` インスタンスを保持
+- 層間でメモリ状態は共有されない
+- メリット: 各層が異なる抽象度の情報を保持可能
+
+**将来検討: 単一共有メモリ（Shared Memory）**
+
+Infini-Attention論文では単一メモリを複数層で共有するバリエーションも議論されている。
+最大コンテキストウィンドウ達成のため、将来的に共有メモリ方式も検討予定。
+
+```
+Layer 12, 16, 20: SharedSenriMemory (共有)
+```
+
 ### Positional Encoding
 
 - **SWA (Local Attention)**: RoPE使用
