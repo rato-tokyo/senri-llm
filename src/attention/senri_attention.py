@@ -296,15 +296,13 @@ class SenriAttention(nn.Module):
         # Use original Q, K, V without positional encoding
         key_expanded = self._repeat_kv(key_states, self.num_key_value_groups)
 
-        # Update memory FIRST, then retrieve
-        # This ensures memory contains information even on the first forward pass
-        # Note: This is slightly different from strict causal Infini Attention,
-        # but necessary for single-forward-pass training to work.
-        # The model learns to use memory for retrieving relevant past information.
-        self.memory.update(key_expanded, value_expanded)
-
-        # Retrieve from memory (after update so memory is not empty)
+        # Retrieve from memory FIRST (following Infini-Attention paper)
+        # If memory is empty, returns zeros (handled in TensorMemory.retrieve)
         global_output = self.memory.retrieve(query_states)
+
+        # Update memory AFTER retrieval (paper-compliant causal order)
+        # This ensures we don't leak future information into past queries
+        self.memory.update(key_expanded, value_expanded)
 
         # ========== Combine Local and Global ==========
         if self.use_memory_gate:

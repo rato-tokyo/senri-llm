@@ -153,6 +153,12 @@ class TensorMemory(nn.Module):
             used during update. This ensures consistent retrieval and positive
             normalization denominators.
         """
+        # Check if memory is empty (z is all zeros)
+        # Return zeros to avoid division issues when memory hasn't been updated
+        z_sum = self.z.abs().sum()
+        if z_sum < self.eps:
+            return torch.zeros_like(queries)
+
         # Apply ELU+1 activation to queries for numerical stability
         sigma_queries = elu_plus_one(queries)
 
@@ -162,9 +168,9 @@ class TensorMemory(nn.Module):
 
         # z^T @ σ(q): [batch, heads, head_dim] @ [batch, heads, seq, head_dim]
         # -> [batch, heads, seq]
-        # Since both z and sigma_queries are positive, denominator is always positive
+        # Use clamp instead of + eps to handle edge cases robustly
         denominator = torch.einsum("bhd,bhsd->bhs", self.z, sigma_queries)
-        denominator = denominator.unsqueeze(-1) + self.eps  # [batch, heads, seq, 1]
+        denominator = denominator.clamp(min=self.eps).unsqueeze(-1)  # [batch, heads, seq, 1]
 
         return numerator / denominator
 
