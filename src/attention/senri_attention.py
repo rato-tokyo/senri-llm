@@ -274,11 +274,7 @@ class SenriAttention(nn.Module):
         # 2. During training (each sample should be independent)
         # 3. Batch size changed
         M = self.memory.memory.M  # Access underlying TensorMemory
-        needs_reset = (
-            M is None
-            or self.training
-            or M.shape[0] != batch_size
-        )
+        needs_reset = M is None or self.training or M.shape[0] != batch_size
         if needs_reset:
             self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
 
