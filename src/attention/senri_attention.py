@@ -274,7 +274,9 @@ class SenriAttention(nn.Module):
         # 2. During training (each sample should be independent)
         # 3. Batch size changed
         current_memory = (
-            self.memory.training_memory if self.training else self.memory._inference_memory
+            self.memory.training_memory
+            if self.training
+            else self.memory._inference_memory
         )
         needs_reset = (
             current_memory is None
