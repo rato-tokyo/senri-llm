@@ -264,11 +264,26 @@ class SenriAttention(nn.Module):
         ).transpose(1, 2)
         # [batch, heads, seq, head_dim]
 
-        # Reset memory for each forward pass
-        # During training: each sample is independent, reset to prevent gradient issues
-        # During eval: also reset for each sample (short context evaluation)
-        # For long-context inference, call reset_memory() externally before generation
-        self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
+        # Memory initialization (lazy reset)
+        # Training: Reset at the start of each sequence (each sample should be independent)
+        # Inference: Memory persists across forward passes for long-context generation
+        #            Call reset_memory() externally before starting a new sequence
+        #
+        # We reset when:
+        # 1. Memory is not initialized (M is None)
+        # 2. During training (each sample should be independent)
+        # 3. Batch size changed
+        current_memory = (
+            self.memory.training_memory if self.training else self.memory._inference_memory
+        )
+        needs_reset = (
+            current_memory is None
+            or current_memory.M is None
+            or self.training
+            or current_memory.M.shape[0] != batch_size
+        )
+        if needs_reset:
+            self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
 
         # ========== Local Attention (SWA with RoPE) ==========
         # Generate RoPE embeddings using internal rotary_emb
