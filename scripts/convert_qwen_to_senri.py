@@ -42,7 +42,9 @@ def get_weight_mapping():
     }
 
 
-def convert_layer_weights(qwen_state_dict: dict, layer_idx: int, has_memory: bool) -> dict:
+def convert_layer_weights(
+    qwen_state_dict: dict, layer_idx: int, has_memory: bool
+) -> dict:
     """
     Convert weights for a single decoder layer.
 
