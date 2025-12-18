@@ -5,6 +5,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 @dataclass
@@ -18,15 +19,34 @@ class SVDCleaningStats:
     singular_values_after: torch.Tensor
 
 
+def elu_plus_one(x: torch.Tensor) -> torch.Tensor:
+    """
+    ELU + 1 activation function for linear attention.
+
+    This ensures all values are positive (>= 1 for positive inputs, > 0 for negative).
+    Used in Infini-Attention (Katharopoulos et al., 2020) for numerical stability
+    in the normalization term.
+
+    Args:
+        x: Input tensor.
+
+    Returns:
+        ELU(x) + 1, ensuring all positive values.
+    """
+    return F.elu(x) + 1
+
+
 class TensorMemory(nn.Module):
     """
     Single tensor product memory for training.
 
     This implements the standard Infini Attention memory:
-    M = Σ v ⊗ k (outer product accumulation)
-    z = Σ k (normalization term)
+    M = Σ v ⊗ σ(k) (outer product accumulation with activation)
+    z = Σ σ(k) (normalization term)
 
-    Retrieval: output = (M @ q) / (z^T @ q + eps)
+    Retrieval: output = (M @ σ(q)) / (z^T @ σ(q) + eps)
+
+    where σ(x) = ELU(x) + 1 ensures positive values for stable normalization.
     """
 
     def __init__(
@@ -91,21 +111,28 @@ class TensorMemory(nn.Module):
             During training, memory is reset at the start of each forward pass,
             so we don't need to worry about gradient accumulation across samples.
             Gradients flow through the current sample's update → retrieve path.
+
+            Keys are transformed with ELU+1 to ensure positive values for
+            stable normalization (following Katharopoulos et al., 2020).
         """
-        # Outer product: v ⊗ k -> [batch, heads, head_dim, head_dim]
+        # Apply ELU+1 activation to keys for numerical stability
+        # This ensures z (sum of keys) is always positive
+        sigma_keys = elu_plus_one(keys)
+
+        # Outer product: v ⊗ σ(k) -> [batch, heads, head_dim, head_dim]
         # Sum over sequence dimension
         # values: [b, h, s, d] -> [b, h, d, s]
-        # keys: [b, h, s, d]
+        # sigma_keys: [b, h, s, d]
         # einsum: bhs d, bhs e -> bh de (sum over s)
-        delta_M = torch.einsum("bhsd,bhse->bhde", values, keys)
+        delta_M = torch.einsum("bhsd,bhse->bhde", values, sigma_keys)
 
         # Detach accumulated state but keep gradient for current update
         # This prevents gradient explosion from accumulating across training samples
         # while still allowing learning within each sample
         self.M = self.M.detach() + delta_M
 
-        # Sum keys for normalization
-        delta_z = keys.sum(dim=2)  # [batch, heads, head_dim]
+        # Sum activated keys for normalization
+        delta_z = sigma_keys.sum(dim=2)  # [batch, heads, head_dim]
         self.z = self.z.detach() + delta_z
 
     def retrieve(
@@ -120,14 +147,23 @@ class TensorMemory(nn.Module):
 
         Returns:
             output: [batch, heads, seq, head_dim]
-        """
-        # M @ q: [batch, heads, head_dim, head_dim] @ [batch, heads, seq, head_dim]
-        # -> [batch, heads, seq, head_dim]
-        numerator = torch.einsum("bhde,bhse->bhsd", self.M, queries)
 
-        # z^T @ q: [batch, heads, head_dim] @ [batch, heads, seq, head_dim]
+        Note:
+            Queries are transformed with ELU+1 to match the key transformation
+            used during update. This ensures consistent retrieval and positive
+            normalization denominators.
+        """
+        # Apply ELU+1 activation to queries for numerical stability
+        sigma_queries = elu_plus_one(queries)
+
+        # M @ σ(q): [batch, heads, head_dim, head_dim] @ [batch, heads, seq, head_dim]
+        # -> [batch, heads, seq, head_dim]
+        numerator = torch.einsum("bhde,bhse->bhsd", self.M, sigma_queries)
+
+        # z^T @ σ(q): [batch, heads, head_dim] @ [batch, heads, seq, head_dim]
         # -> [batch, heads, seq]
-        denominator = torch.einsum("bhd,bhsd->bhs", self.z, queries)
+        # Since both z and sigma_queries are positive, denominator is always positive
+        denominator = torch.einsum("bhd,bhsd->bhs", self.z, sigma_queries)
         denominator = denominator.unsqueeze(-1) + self.eps  # [batch, heads, seq, 1]
 
         return numerator / denominator

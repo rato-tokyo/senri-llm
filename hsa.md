@@ -423,10 +423,236 @@ HSA:
 
 ---
 
-## 14. 参考文献（主要なもの）
+## 14. Self-copy Warm-up戦略の詳細
 
+### 14.1 Self-copy Objective
+
+論文 Section 4.1:
+> "Given an input sequence S = {x₁, ..., xₙ}, we construct a target sequence S' = {x₁, ..., xₙ, x₁, ..., xₙ} by concatenating S with itself."
+
+```python
+# Self-copy warm-up の擬似コード
+def create_self_copy_sample(sequence):
+    # 入力: S = [x1, x2, ..., xn]
+    # 出力: S' = [x1, x2, ..., xn, x1, x2, ..., xn]
+    return sequence + sequence
+
+# モデルは後半部分を再構成することを学習
+# → 長距離の prefix 情報を attend して retrieve する能力を獲得
+```
+
+**効果**: モデルが長距離のプレフィックス情報に attend し、retrieve する能力を獲得
+
+### 14.2 Warm-up戦略の比較（Table 2詳細）
+
+| 戦略 | パラメータ | PG19 PPL (4K/8K/16K) | MQ-NIAH (4K/8K/64K/1M) |
+|------|----------|---------------------|----------------------|
+| BaseLM（warm-upなし） | 519.6M | 18.61/17.53/16.77 | 89.0/23.0/5.0/0.0 |
+| SWA+HSA (self-copy) | 537.7M | 18.87/17.44/16.50 | **100.0/96.0/93.0/93.0** |
+| SWA+HSA (short-swa,full-hsa) | 537.7M | **18.30/17.13/15.96** | 99.0/95.0/90.0/66.0 |
+
+**結論**:
+- **Self-copy**: 最良の長さ外挿（1Mで93%）、in-domain性能は若干低下
+- **Short SWA + Full HSA**: in-domain性能維持、合理的な外挿能力
+
+---
+
+## 15. Query-Key Normalization（QK Norm）
+
+論文 Section 2.2:
+> "norm is the Query-Key Normalization, which we find to be very important for the stability of HSA in practical trillion-token scale training."
+
+### 15.1 QK Normの数式
+
+```
+Ōₜ,ᵢ = Softmax( norm(Qₜᵃᵗᵗⁿ) norm(K[i]ᵀ) / √dₕ ) V[i]
+```
+
+### 15.2 なぜQK Normが重要か
+
+| 問題 | QK Normなし | QK Normあり |
+|------|------------|------------|
+| 兆トークン規模学習 | 不安定、発散リスク | 安定 |
+| Attention重み分布 | 極端な値が発生 | 均一化 |
+| 勾配流 | 消失/爆発 | 安定 |
+
+参考文献:
+- Dehghani et al. (2023): "Scaling vision transformers to 22 billion parameters"
+- Wortsman et al. (2023): "Small-scale proxies for large-scale transformer training instabilities"
+
+---
+
+## 16. Bi-directional Encoder（チャンクエンコーダ）詳細
+
+### 16.1 構造
+
+```
+入力: H^(L/2)[i] ∈ ℝˢˣᵈ  (中間層出力のi番目チャンク)
+      ↓
+[CLS]トークンを追加: [CLS, H^(L/2)[i]]
+      ↓
+Bi-directional Encoder
+      ↓
+出力: E[i] ∈ ℝˢˣᵈ (エンコード済み表現)
+      Lᵢ ∈ ℝᵈ (ランドマーク表現、[CLS]の出力)
+```
+
+### 16.2 KVキャッシュの導出
+
+```python
+# E[i]から線形変換でKeys, Valuesを導出
+K[i] = E[i] @ W_K  # Shape: [S, h, d_h]
+V[i] = E[i] @ W_V  # Shape: [S, h, d_h]
+
+# ランドマーク表現
+K_slc[i] = L[i]  # Shape: [d]、チャンク要約として使用
+```
+
+### 16.3 KVキャッシュ共有
+
+> "we share the intermediate layer KV cache among all HSA modules to serve as context memory"
+
+- **中間層（L/2層）** の出力からKVキャッシュを一度だけ計算
+- **全てのHSAモジュール** でこのKVキャッシュを共有
+- **メリット**: メモリ効率の大幅改善
+
+---
+
+## 17. 詳細なNIAH結果（Figure 4）
+
+### 17.1 Single-NIAH（Long-context mid-training後）
+
+| Depth | 4K | 16K | 64K | 256K | 1M | 4M | 16M |
+|-------|-----|-----|-----|------|-----|-----|-----|
+| 0% | 98 | 96 | 100 | 98 | 94 | 98 | 95 |
+| 11% | 100 | 96 | 100 | 98 | 96 | 98 | 100 |
+| 22% | 100 | 96 | 100 | 98 | 100 | 98 | 100 |
+| 33% | 100 | 98 | 100 | 98 | 94 | 98 | 100 |
+| 44% | 100 | 98 | 100 | 100 | 98 | 98 | 95 |
+| 55% | 100 | 96 | 100 | 98 | 98 | 94 | 95 |
+| 66% | 100 | 98 | 100 | 98 | 98 | 98 | 100 |
+| 77% | 100 | 96 | 100 | 98 | 98 | 96 | 95 |
+| 88% | 100 | 98 | 100 | 98 | 98 | 98 | 95 |
+| 100% | 100 | 98 | 100 | 98 | 96 | 98 | 100 |
+
+**注目**: 16Mトークンでも95-100%の精度を維持
+
+### 17.2 Multi-Query NIAH（2クエリ、6 KVペア）
+
+| モデル | 4K | 16K | 64K | 256K | 1M | 4M | 16M |
+|--------|-----|-----|-----|------|-----|-----|-----|
+| MoE-8B-A1B-Annealing | ~100 | ~98 | ~95 | ~90 | ~85 | ~75 | ~65 |
+| MoE-8B-A1B | ~100 | ~95 | ~90 | ~80 | ~70 | ~55 | ~45 |
+| Dense-0.5B | ~100 | ~95 | ~88 | ~75 | ~60 | ~40 | ~25 |
+| Dense-0.5B (SWA 512) | ~100 | ~98 | ~95 | ~90 | ~85 | ~80 | ~70 |
+
+### 17.3 Variable Tracking Task
+
+| モデル | 4K | 16K | 64K | 256K | 1M | 4M | 16M |
+|--------|-----|-----|-----|------|-----|-----|-----|
+| MoE-8B-A1B | ~95 | ~90 | ~85 | ~75 | ~65 | ~50 | ~35 |
+| Dense-0.5B | ~90 | ~80 | ~65 | ~50 | ~35 | ~20 | ~10 |
+
+**発見**: 推論+検索タスクではパラメータ規模が重要
+
+---
+
+## 18. HSA実装詳細
+
+### 18.1 TileLang実装
+
+論文 Section 4.4:
+> "HSA implemented using TileLang"
+
+- **TileLang**: AIシステム向けのコンポーザブルなタイルプログラミングモデル
+- 参考: Wang et al. (2025) "Tilelang: A composable tiled programming model for AI systems"
+
+### 18.2 効率性ベンチマーク（H800）
+
+**学習効率** (Wall-clock Time in ms):
+
+| コンテキスト長 | HSA | FlashAttention-3 |
+|---------------|-----|------------------|
+| 4K | ~30 | ~15 |
+| 8K | ~45 | ~25 |
+| 16K | ~70 | ~50 |
+| 32K | ~110 | ~95 |
+
+**推論効率** (Wall-clock Time in ms):
+
+| コンテキスト長 | HSA | FlashAttention-3 |
+|---------------|-----|------------------|
+| 4K | ~50 | ~20 |
+| 8K | ~80 | ~40 |
+| 16K | ~120 | ~80 |
+| 32K | ~180 | ~150 |
+| 64K | ~280 | ~300 |
+| 128K | ~400 | ~500 |
+| 256K | ~600 | ~800 |
+
+**クロスオーバーポイント**: 推論では約128Kでbreak-even、256K以上でHSA優位
+
+### 18.3 HSAが短いシーケンスで不利な理由
+
+1. **スパース性によるメモリアクセス増加**: 非連続アクセスパターン
+2. **FlashAttention-3のCUDA最適化**: Hopperアーキテクチャの機能を最大活用
+
+---
+
+## 19. HSA層のパラメータ増加
+
+論文 Section 4.1:
+> "Each HSA layer includes an additional encoder sub-layer, resulting in less than 5% parameter increase compared to BaseLM."
+
+| モデル | パラメータ数 | 増加率 |
+|--------|------------|--------|
+| BaseLM | 519.6M | - |
+| SWA+HSA | 537.7M | +3.5% |
+
+**増加の内訳**:
+- Bi-directional Encoder
+- ランドマーク射影層
+- 検索用クエリ射影層
+
+---
+
+## 20. 長文評価における3つの重要発見
+
+### 20.1 発見1: 学習データの実効コンテキスト長が外挿に決定的
+
+> "Effective context length of training data is critical for HSA extrapolation"
+
+- 16K窓で学習しても、データの実効長が短いと外挿性能劣化
+- **>32K** の実効長データで学習すると大幅改善
+- Long-context mid-training が必要な理由
+
+### 20.2 発見2: HSA/SWAのシーソー効果
+
+> "A seesaw effect exists between HSA and Sliding Window Attention"
+
+| SWA窓サイズ | HSA外挿性能 | 理由 |
+|------------|-----------|------|
+| 512 | 高い | HSAが短距離パターンも学習 |
+| 4K | 低い | SWAが短距離を処理、HSAの学習動機減少 |
+
+**解決策**: Warm-upフェーズで512窓を使用
+
+### 20.3 発見3: 推論-検索タスクではパラメータ規模が効く
+
+| タスク種類 | Dense-0.5B vs MoE-8B-A1B |
+|----------|-------------------------|
+| 純粋検索（MQ-NIAH） | 同等 |
+| 推論+検索（Variable Tracking） | MoE-8Bが明確に優位 |
+
+---
+
+## 21. 参考文献（主要なもの）
+
+- [11] Dehghani et al. "Scaling vision transformers to 22 billion parameters." 2023. (QK Norm)
 - [18] Hu et al. "Hardware-aligned hierarchical sparse attention for efficient long-term memory access." NeurIPS 2025.
 - [19] Hu et al. "Efficient length-generalizable attention via causal retrieval for long-context language modeling." ICML 2025.
 - [23] Leng et al. "Understanding and improving length generalization in hierarchical sparse attention models." arXiv:2510.17196.
 - [29] Mohtashami & Jaggi. "Random-access infinite context length for transformers." NeurIPS 2023.
+- [39] Wang et al. "Tilelang: A composable tiled programming model for AI systems." 2025.
+- [41] Wortsman et al. "Small-scale proxies for large-scale transformer training instabilities." 2023.
 - [47] Yuan et al. "Native sparse attention: Hardware-aligned and natively trainable sparse attention." ACL 2025.

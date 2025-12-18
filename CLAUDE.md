@@ -179,27 +179,27 @@ Layer 12, 16, 20: SharedSenriMemory (共有)
 
 | 項目 | 論文 | 現在の実装 | 影響 | 優先度 |
 |------|------|----------|------|--------|
-| 活性化関数σ | ELU + 1 | なし（raw K, Q） | 数値安定性がやや低下 | 中 |
+| 活性化関数σ | ELU + 1 | ✅ 実装済み | - | - |
 | 更新順序 | retrieve → update | update → retrieve | 厳密な因果性が失われる | 高 |
 | Delta更新 | あり（オプション） | 未実装 | 既存バインディング重複時に非効率 | 低 |
 | セグメント処理 | チャンク単位で処理 | 全シーケンス一括 | 上記の順序問題の根本原因 | 高 |
 
-### 1. 活性化関数σの欠如
+### 1. 活性化関数σ（実装済み）
 
 **論文**: `σ(K) = ELU(K) + 1` を Keys/Queries に適用
-**現在**: raw K, Q をそのまま使用
+**現在**: ✅ 実装済み（`base_memory.py` の `elu_plus_one` 関数）
 
 ```python
-# 論文
-sigma_k = F.elu(keys) + 1
-delta_M = einsum(values, sigma_k)
+# 論文準拠の実装
+def elu_plus_one(x):
+    return F.elu(x) + 1
 
-# 現在の実装
-delta_M = einsum(values, keys)  # raw keys
+sigma_keys = elu_plus_one(keys)
+sigma_queries = elu_plus_one(queries)
+delta_M = einsum(values, sigma_keys)
 ```
 
-**影響**: 負の値が存在し、正規化が不安定になる可能性
-**妥協の理由**: 基本動作確認を優先。ELU+1なしでも動作する
+**効果**: 全ての値が正になり、正規化の分母が常に正（NaN防止）
 
 ### 2. update → retrieve 順序（最重要）
 
