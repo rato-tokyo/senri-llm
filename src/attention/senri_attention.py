@@ -1,7 +1,8 @@
-"""Senri Attention: Memory-only attention (no local attention).
+"""Senri Attention: Memory-only attention with GQA support.
 
-This is the simplest implementation:
+This is a simplified implementation:
 - Only tensor product memory (no sliding window attention)
+- GQA (Grouped Query Attention) compatible with SmolLM
 - Following new-llm's design for stability
 """
 
@@ -15,17 +16,20 @@ from ..memory import SenriMemory
 
 class SenriAttention(nn.Module):
     """
-    Memory-only attention layer.
+    Memory-only attention layer with GQA support.
 
-    This is the simplest design:
-    - Input -> Q,K,V projection -> Memory retrieve/update -> Output projection
+    Design:
+    - Input -> Q,K,V projection (GQA) -> Memory retrieve/update -> Output projection
     - No local attention (memory only)
     - No positional encoding (NoPE)
+    - Compatible with SmolLM's GQA structure
     """
 
     def __init__(
         self,
         hidden_size: int,
+        num_attention_heads: int,
+        num_key_value_heads: int,
         eps: float = 1e-6,
         layer_idx: int = 0,
     ):
@@ -34,26 +38,55 @@ class SenriAttention(nn.Module):
 
         Args:
             hidden_size: Model hidden size.
+            num_attention_heads: Number of query heads.
+            num_key_value_heads: Number of key/value heads (for GQA).
             eps: Epsilon for numerical stability.
             layer_idx: Layer index for debugging.
         """
         super().__init__()
 
         self.hidden_size = hidden_size
+        self.num_attention_heads = num_attention_heads
+        self.num_key_value_heads = num_key_value_heads
+        self.head_dim = hidden_size // num_attention_heads
+        self.num_key_value_groups = num_attention_heads // num_key_value_heads
         self.layer_idx = layer_idx
         self.eps = eps
 
-        # Projections
-        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False)
+        # Projections (GQA compatible - same as SmolLM)
+        self.q_proj = nn.Linear(
+            hidden_size, num_attention_heads * self.head_dim, bias=True
+        )
+        self.k_proj = nn.Linear(
+            hidden_size, num_key_value_heads * self.head_dim, bias=True
+        )
+        self.v_proj = nn.Linear(
+            hidden_size, num_key_value_heads * self.head_dim, bias=True
+        )
+        self.o_proj = nn.Linear(
+            num_attention_heads * self.head_dim, hidden_size, bias=False
+        )
 
-        # Memory
+        # Memory (operates on full hidden_size after expanding KV)
         self.memory = SenriMemory(
             memory_dim=hidden_size,
             eps=eps,
         )
+
+    def _repeat_kv(self, hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+        """Repeat KV heads to match query heads (for GQA)."""
+        if n_rep == 1:
+            return hidden_states
+        batch, seq_len, num_kv_heads_x_head_dim = hidden_states.shape
+        num_kv_heads = num_kv_heads_x_head_dim // self.head_dim
+        # Reshape to [batch, seq, num_kv_heads, head_dim]
+        hidden_states = hidden_states.view(batch, seq_len, num_kv_heads, self.head_dim)
+        # Expand to [batch, seq, num_kv_heads, n_rep, head_dim]
+        hidden_states = hidden_states[:, :, :, None, :].expand(
+            batch, seq_len, num_kv_heads, n_rep, self.head_dim
+        )
+        # Reshape to [batch, seq, num_kv_heads * n_rep * head_dim]
+        return hidden_states.reshape(batch, seq_len, num_kv_heads * n_rep * self.head_dim)
 
     def forward(
         self,
@@ -84,11 +117,17 @@ class SenriAttention(nn.Module):
             None (attention weights, not used)
             None (cache, not used)
         """
-        # Project to Q, K, V
-        # Shape: [batch, seq, hidden_size]
+        # Project to Q, K, V (GQA structure)
+        # Q: [batch, seq, num_heads * head_dim]
+        # K, V: [batch, seq, num_kv_heads * head_dim]
         queries = self.q_proj(hidden_states)
         keys = self.k_proj(hidden_states)
         values = self.v_proj(hidden_states)
+
+        # Expand K, V to match Q heads for memory operations
+        # [batch, seq, num_kv_heads * head_dim] -> [batch, seq, num_heads * head_dim]
+        keys = self._repeat_kv(keys, self.num_key_value_groups)
+        values = self._repeat_kv(values, self.num_key_value_groups)
 
         # Memory reset at training (each sample independent)
         if self.training:
