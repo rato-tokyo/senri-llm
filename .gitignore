@@ -55,8 +55,9 @@ logs/
 wandb/
 runs/
 
-# Data
-data/
+# Data (exclude raw data, but keep src/data module)
+/data/
+!src/data/
 *.csv
 *.json
 *.jsonl
