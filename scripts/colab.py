@@ -215,15 +215,29 @@ def test_memory():
     clear_memory()
 
 
-def load_qwen_and_convert():
+def load_qwen_and_convert(
+    model_name: str = "Qwen/Qwen2.5-0.5B",
+    output_dir: str = "./senri-0.5b",
+):
     """Load Qwen2.5-0.5B and convert to Senri model."""
     print("=" * 50)
-    print("Loading Qwen2.5-0.5B and Converting to Senri")
+    print(f"Loading {model_name} and Converting to Senri")
     print("=" * 50)
 
-    # This will be implemented when we complete modeling_senri.py
-    print("TODO: Implement model conversion")
-    print("For now, testing with randomly initialized model")
+    from convert_qwen_to_senri import convert_qwen_to_senri, verify_conversion
+
+    device = get_device()
+    device_str = "cuda" if device.type == "cuda" else "cpu"
+
+    senri_model = convert_qwen_to_senri(
+        model_name=model_name,
+        output_dir=output_dir,
+        device=device_str,
+    )
+
+    verify_conversion(senri_model, model_name, device_str)
+
+    return senri_model
 
 
 def train_experiment(args):
@@ -266,9 +280,15 @@ def main():
     parser.add_argument(
         "--experiment",
         type=str,
-        choices=["test", "test_memory", "train", "eval"],
+        choices=["test", "test_memory", "convert", "train", "eval"],
         default="test",
         help="Experiment to run",
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="Qwen/Qwen2.5-0.5B",
+        help="Base model name for conversion",
     )
     parser.add_argument(
         "--checkpoint",
@@ -311,6 +331,8 @@ def main():
         test_model()
     elif args.experiment == "test_memory":
         test_memory()
+    elif args.experiment == "convert":
+        load_qwen_and_convert(args.model_name, args.output_dir)
     elif args.experiment == "train":
         train_experiment(args)
     elif args.experiment == "eval":
