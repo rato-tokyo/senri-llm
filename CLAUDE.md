@@ -170,6 +170,121 @@ Layer 12, 16, 20: SharedSenriMemory (共有)
 - **SWA (Local Attention)**: RoPE使用
 - **Senri Memory (Global Attention)**: NoPE (No Positional Encoding)
 
+## 論文との相違点と意図的な妥協 - 重要
+
+現在の実装は、Infini-Attention論文と以下の点で異なります。
+これらは**意図的な妥協**であり、将来的な修正対象です。
+
+### 相違点一覧
+
+| 項目 | 論文 | 現在の実装 | 影響 | 優先度 |
+|------|------|----------|------|--------|
+| 活性化関数σ | ELU + 1 | なし（raw K, Q） | 数値安定性がやや低下 | 中 |
+| 更新順序 | retrieve → update | update → retrieve | 厳密な因果性が失われる | 高 |
+| Delta更新 | あり（オプション） | 未実装 | 既存バインディング重複時に非効率 | 低 |
+| セグメント処理 | チャンク単位で処理 | 全シーケンス一括 | 上記の順序問題の根本原因 | 高 |
+
+### 1. 活性化関数σの欠如
+
+**論文**: `σ(K) = ELU(K) + 1` を Keys/Queries に適用
+**現在**: raw K, Q をそのまま使用
+
+```python
+# 論文
+sigma_k = F.elu(keys) + 1
+delta_M = einsum(values, sigma_k)
+
+# 現在の実装
+delta_M = einsum(values, keys)  # raw keys
+```
+
+**影響**: 負の値が存在し、正規化が不安定になる可能性
+**妥協の理由**: 基本動作確認を優先。ELU+1なしでも動作する
+
+### 2. update → retrieve 順序（最重要）
+
+**論文の順序**（因果性維持）:
+```
+Segment s の処理:
+1. M_{s-1} から retrieve（過去のメモリを検索）
+2. ローカルAttention計算
+3. ゲートで結合
+4. M_s に update（現在のKVでメモリ更新）
+```
+
+**現在の実装**:
+```
+各forward-pass:
+1. memory.update(K, V)    # 先に更新
+2. memory.retrieve(Q)     # 後で検索
+```
+
+**影響**: 現在のトークンが自分自身をメモリから検索できてしまう（未来の情報を使用）
+**妥協の理由**: 単一forward-pass学習では、retrieve→updateだとメモリが常に空
+**根本的な解決策**: セグメント単位処理の実装（下記参照）
+
+### 3. セグメント単位処理の未実装
+
+**論文**: 長いシーケンスをセグメントに分割し、セグメントごとに処理
+
+```python
+# 論文の方式
+for segment in chunks(sequence, segment_length=2048):
+    mem_output = memory.retrieve(segment_queries)  # 過去から検索
+    local_output = local_attention(segment)
+    output = gate * mem_output + (1-gate) * local_output
+    memory.update(segment_keys, segment_values)    # その後更新
+```
+
+**現在**: 全シーケンスを一括処理
+
+**影響**: retrieve→update順序を維持できない
+**妥協の理由**: 実装の複雑さを避け、基本動作確認を優先
+
+### 4. Delta更新の未実装
+
+**論文のDelta更新**:
+```python
+# 既存バインディングを引いてから更新
+retrieved = sigma_K @ M / (sigma_K @ z)
+M = M + sigma_K.T @ (V - retrieved)
+```
+
+**現在**: Linear更新のみ
+```python
+M = M + K.T @ V
+```
+
+**影響**: 同じキーで繰り返し更新すると値が蓄積
+**妥協の理由**: 論文でもLinear更新で良い結果を示している（Table 2）
+
+### 将来的な修正ロードマップ
+
+1. **Phase 1（現在）**: 基本動作確認
+   - 単一forward-pass、update→retrieve順序
+   - 最低限のメモリ学習が機能することを確認
+
+2. **Phase 2**: セグメント処理の実装
+   - チャンク単位の処理ループ
+   - retrieve→update順序の実現
+   - BPTTによる勾配計算
+
+3. **Phase 3**: 論文完全準拠
+   - ELU+1活性化関数の追加
+   - Delta更新のオプション実装
+   - 32K以上の長文学習
+
+### 現在の妥協による期待される精度
+
+- **完全に動作しない**: ❌ ではない
+- **最高性能に達する**: ❌ 期待できない
+- **メモリの効果が観測できる**: ✅ 期待できる
+- **NIAHタスクでの改善**: ✅ 期待できる
+
+**根拠**: 論文のLinear更新（Delta更新なし）でも良好な結果を示している。
+update→retrieve順序は厳密な因果性を緩和するが、モデルは「自分が入れた情報」を
+学習できるため、実用上は動作する。
+
 ## Training vs Inference Mode（現在: シンプル化版）
 
 **現在のシンプル化版では、学習・推論で同じメモリを使用。**

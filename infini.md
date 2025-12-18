@@ -291,11 +291,165 @@ Ms = Ms_prev + sigma_K.T @ (V - retrieved)
 
 ---
 
-## 8. まとめ
+## 8. 他モデルとのメモリフットプリント比較（Table 1）
+
+| モデル | メモリフットプリント | 有効コンテキスト長 | メモリ更新 | メモリ検索 |
+|--------|---------------------|-------------------|-----------|-----------|
+| Transformer-XL | `(d_key + d_value) × H × N × l` | `N × l` | 破棄 | Dot-product attention |
+| Compressive Transformer | `d_model × (c + N) × l` | `(c × r + N) × l` | 破棄 | Dot-product attention |
+| Memorizing Transformers | `(d_key + d_value) × H × N × S` | `N × S` | なし | kNN + dot-product |
+| RMT | `d_model × p × l × 2` | `N × S` | 破棄 | Soft-prompt input |
+| AutoCompressors | `d_model × p × (m + 1) × l` | `N × S` | 破棄 | Soft-prompt input |
+| **Infini-Transformers** | `d_key × (d_value + 1) × H × l` | `N × S` | **増分更新** | **Linear attention** |
+
+- `N`: 入力セグメント長
+- `S`: セグメント数
+- `l`: レイヤー数
+- `H`: アテンションヘッド数
+- `c`: Compressive Transformerのメモリサイズ
+- `r`: 圧縮率
+- `p`: soft-promptサマリーベクトル数
+- `m`: サマリーベクトル累積ステップ
+
+**Infini-Transformerの優位性**: メモリフットプリントがシーケンス長に依存しない定数
+
+---
+
+## 9. ゲートスコアの分析（Figure 3）
+
+学習後、ヘッドは2タイプに分化：
+
+### 9.1 ヘッドタイプ
+
+| タイプ | ゲートスコア | 役割 |
+|--------|------------|------|
+| **特化型（Short-range）** | β ≈ 0 | ローカルAttentionのみ使用 |
+| **特化型（Long-range）** | β ≈ 1 | メモリ検索のみ使用 |
+| **混合型（Mixer）** | β ≈ 0.5 | ローカルとメモリを均等に結合 |
+
+### 9.2 観察された特徴
+
+- **各層に最低1つのshort-rangeヘッドが存在** → 入力信号が出力層まで直接伝播可能
+- **長距離・短距離コンテンツの取得がインターリーブ** → forward計算全体で交互に発生
+
+---
+
+## 10. Multi-Head Attention統合
+
+### 10.1 並列計算
+
+```
+O = [A¹; A²; ... Aᴴ] @ W_O
+```
+
+- 各ヘッドが独立した圧縮メモリを保持
+- H個のコンテキスト状態を並列計算
+- 結合後に出力プロジェクション `W_O ∈ R^(H×d_value×d_model)`
+
+### 10.2 ヘッドごとの独立性
+
+各ヘッドは以下を独立して保持：
+- メモリ行列 `Mʰ ∈ R^(d_key×d_value)`
+- 正規化項 `zʰ ∈ R^(d_key)`
+- ゲートスカラー `βʰ ∈ R`
+
+---
+
+## 11. Passkey Retrieval Task フォーマット（Appendix B）
+
+```
+There is an important info hidden inside a lot of irrelevant text.
+Find it and memorize them. I will quiz you about the important
+information there. The grass is green. The sky is blue. The sun
+is yellow. Here we go. There and back again. (repeat x times)
+
+The pass key is 9054. Remember it. 9054 is the pass key.
+
+The grass is green. The sky is blue. The sun is yellow. Here we go.
+There and back again. (repeat y times)
+
+What is the pass key? The pass key is
+```
+
+- `x`, `y` を調整してpasskeyの位置（先頭/中央/末尾）を制御
+- 繰り返しテキストで任意の長さに拡張
+
+---
+
+## 12. 理論的背景と関連研究
+
+### 12.1 連想メモリの系譜
+
+| 手法 | 年 | 特徴 |
+|------|-----|------|
+| Hopfield Networks | 1982 | エネルギーベースの連想記憶 |
+| Sparse Distributed Memory | 1988 | 高次元空間での分散表現 |
+| Fast Weights | 1987, 1992 | 短期記憶のパラメータ化 |
+| Neural Turing Machines | 2014 | 外部メモリへの読み書き |
+| Metalearned Neural Memory (MNM) | 2019 | FFNをメモリとして使用、QKVで操作 |
+
+### 12.2 Linear Attentionとの関係
+
+Infini-attentionのメモリ操作は**Linear Attention**（Katharopoulos et al., 2020）と等価：
+
+```
+# Standard attention: O(N²)
+A = softmax(QK^T / √d) @ V
+
+# Linear attention: O(N)
+A = σ(Q) @ (σ(K)^T @ V) / (σ(Q) @ σ(K)^T @ 1)
+```
+
+連想行列 `σ(K)^T @ V` は外積の累積であり、Infini-attentionのメモリ更新と同一。
+
+### 12.3 Tensor Product Variable Binding（Smolensky, 1990）
+
+メモリ更新 `σ(K)^T @ V` は**テンソル積変数バインディング**：
+- Key を「アドレス」、Value を「内容」として結合
+- 外積によりシンボリックな構造を連続空間で表現
+
+---
+
+## 13. 既知の課題と対策
+
+### 13.1 Attention Sink問題
+
+> "The attention mechanism is also prone to the issues of attention sink" (論文 Section 5)
+
+**問題**: 最初のトークンに過剰なattention重みが集中
+**Infini-attentionの対策**: セグメント単位処理でローカルattentionを固定長に制限
+
+### 13.2 Lost-in-the-Middle問題
+
+> "lost-in-the-middle" (Liu et al., 2024)
+
+**問題**: 長文の中央部分の情報が失われやすい
+**Infini-attentionの対策**: 圧縮メモリが全位置の情報を均等に保持
+
+### 13.3 長さ外挿の課題
+
+> "they struggle in a regime where context length is longer than what was observed during training"
+
+**Infini-attentionの実証**: 5K長学習 → 1M長評価で成功
+
+---
+
+## 14. まとめ
 
 Infini-attentionは：
 1. **固定サイズメモリ**で無限長コンテキストを処理
 2. **114x圧縮率**でMemorizing Transformersを上回る
 3. **5K長学習→1M長評価**の外挿能力を実証
+4. **Linear Attention**とテンソル積バインディングの理論的基盤
+5. **Attention Sink/Lost-in-the-Middle問題**への対策
 
 現在のSenri実装は基本的な構造は正しいが、**セグメント処理**と**活性化関数**の追加で論文により忠実な実装が可能。
+
+---
+
+## 参考文献（主要）
+
+- Katharopoulos et al. (2020): "Transformers are RNNs: Fast autoregressive transformers with linear attention"
+- Schlag et al. (2020, 2021): "Learning associative inference using fast weight memory", "Linear transformers are secretly fast weight programmers"
+- Munkhdalai et al. (2019): "Metalearned neural memory"
+- Smolensky (1990): "Tensor product variable binding"
