@@ -125,9 +125,25 @@ class SenriTrainer:
 
         return tokenized_dataset
 
+    def _find_latest_checkpoint(self) -> Optional[str]:
+        """Find the latest checkpoint in the training output directory."""
+        training_dir = Path(self.config.output_dir) / "training"
+        if not training_dir.exists():
+            return None
+
+        # Find all checkpoint directories
+        checkpoints = list(training_dir.glob("checkpoint-*"))
+        if not checkpoints:
+            return None
+
+        # Sort by step number and return the latest
+        checkpoints.sort(key=lambda x: int(x.name.split("-")[1]))
+        latest = checkpoints[-1]
+        return str(latest)
+
     def train(self, tokenized_dataset) -> Trainer:
         """
-        Run training.
+        Run training. Automatically resumes from the latest checkpoint if available.
 
         Args:
             tokenized_dataset: Tokenized dataset with train/validation splits.
@@ -175,13 +191,21 @@ class SenriTrainer:
             callbacks=callbacks if callbacks else None,
         )
 
+        # Check for existing checkpoint to resume from
+        resume_checkpoint = self._find_latest_checkpoint()
+
         # Train
         print("\nStarting training...")
         print(f"  Epochs: {self.config.num_epochs}")
         print(f"  Batch size: {self.config.batch_size}")
         print(f"  Learning rate: {self.config.learning_rate}")
 
-        train_result = trainer.train()
+        if resume_checkpoint:
+            print(f"  Resuming from: {resume_checkpoint}")
+            train_result = trainer.train(resume_from_checkpoint=resume_checkpoint)
+        else:
+            print("  Starting from scratch")
+            train_result = trainer.train()
 
         # Save final model
         final_model_path = Path(self.config.output_dir) / "senri-trained"
