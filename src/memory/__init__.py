@@ -2,7 +2,7 @@
 
 from .base_memory import SVDCleaningStats, TensorMemory
 from .orthogonal_memory import OrthogonalBasisMemory, OrthogonalSVDCleaningStats
-from .senri_memory import SenriMemory
+from .senri_memory import MemoryHealthStats, SenriMemory
 
 __all__ = [
     "TensorMemory",
@@ -10,4 +10,5 @@ __all__ = [
     "SenriMemory",
     "SVDCleaningStats",
     "OrthogonalSVDCleaningStats",
+    "MemoryHealthStats",
 ]
