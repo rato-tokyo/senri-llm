@@ -258,7 +258,6 @@ def train_experiment(args):
     from datasets import load_dataset
 
     from src.modeling_senri import SenriForCausalLM
-    from src.configuration_senri import SenriConfig
 
     # Step 1: Load or convert model
     print("\n[Step 1] Loading/Converting model...")
@@ -401,7 +400,7 @@ def train_experiment(args):
     trainer.save_metrics("train", metrics)
     trainer.save_state()
 
-    print(f"\nTraining complete!")
+    print("\nTraining complete!")
     print(f"  Final loss: {metrics.get('train_loss', 'N/A')}")
     print(f"  Model saved to: {final_model_path}")
 
@@ -411,7 +410,9 @@ def train_experiment(args):
         if drive_path.exists():
             import shutil
 
-            drive_save_path = drive_path / f"senri-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            drive_save_path = (
+                drive_path / f"senri-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            )
             shutil.copytree(final_model_path, drive_save_path)
             print(f"  Also saved to Google Drive: {drive_save_path}")
     except Exception as e:
