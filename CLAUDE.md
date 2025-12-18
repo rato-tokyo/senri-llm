@@ -560,6 +560,26 @@ def forward(self, ...):
 
 **症状**: NIAH評価で正答率0%、長文生成で前半の情報を参照できない
 
+### 5. retrieve→update順序問題（致命的）
+```python
+# Bad: retrieve→update順序（学習時にメモリが常にゼロ）
+def forward(self, ...):
+    self.memory.reset(...)           # 学習時は毎回リセット
+    global_out = self.memory.retrieve(q)  # ❌ Mがゼロなので出力もゼロ
+    self.memory.update(k, v)         # Mに値を追加（次で消える）
+
+# Good: update→retrieve順序
+def forward(self, ...):
+    self.memory.reset(...)           # 学習時は毎回リセット
+    self.memory.update(k, v)         # ✅ まずMに値を追加
+    global_out = self.memory.retrieve(q)  # Mに値があるので正常動作
+```
+
+**症状**: 学習中にメモリからの出力が常にゼロ、メモリゲートが学習されない
+
+**注意**: この順序変更は厳密な因果性を緩和するが、単一forward-pass学習では必要。
+論文準拠のチャンク単位処理を実装すれば、retrieve→update順序でも動作する。
+
 ## Debugging Tips
 
 ### メモリ状態の確認

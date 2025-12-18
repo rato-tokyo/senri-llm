@@ -300,15 +300,15 @@ class SenriAttention(nn.Module):
         # Use original Q, K, V without positional encoding
         key_expanded = self._repeat_kv(key_states, self.num_key_value_groups)
 
-        # Update memory with current chunk
-        # In training, we update memory at chunk boundaries
-        # For simplicity, we update every forward pass and retrieve
-
-        # Retrieve from memory (before update for causal consistency)
-        global_output = self.memory.retrieve(query_states)
-
-        # Update memory with current keys and values
+        # Update memory FIRST, then retrieve
+        # This ensures memory contains information even on the first forward pass
+        # Note: This is slightly different from strict causal Infini Attention,
+        # but necessary for single-forward-pass training to work.
+        # The model learns to use memory for retrieving relevant past information.
         self.memory.update(key_expanded, value_expanded)
+
+        # Retrieve from memory (after update so memory is not empty)
+        global_output = self.memory.retrieve(query_states)
 
         # ========== Combine Local and Global ==========
         if self.use_memory_gate:
