@@ -141,6 +141,21 @@ class SenriTrainer:
         latest = checkpoints[-1]
         return str(latest)
 
+    def _clear_checkpoints(self):
+        """Clear all checkpoints and trained model for fresh start."""
+        import shutil
+
+        training_dir = Path(self.config.output_dir) / "training"
+        trained_dir = Path(self.config.output_dir) / "senri-trained"
+
+        if training_dir.exists():
+            print(f"  Clearing checkpoints: {training_dir}")
+            shutil.rmtree(training_dir)
+
+        if trained_dir.exists():
+            print(f"  Clearing trained model: {trained_dir}")
+            shutil.rmtree(trained_dir)
+
     def train(self, tokenized_dataset) -> Trainer:
         """
         Run training. Automatically resumes from the latest checkpoint if available.
@@ -191,8 +206,14 @@ class SenriTrainer:
             callbacks=callbacks if callbacks else None,
         )
 
-        # Check for existing checkpoint to resume from
-        resume_checkpoint = self._find_latest_checkpoint()
+        # Handle fresh start
+        if self.config.fresh_start:
+            print("\n  Fresh start enabled - clearing existing checkpoints...")
+            self._clear_checkpoints()
+            resume_checkpoint = None
+        else:
+            # Check for existing checkpoint to resume from
+            resume_checkpoint = self._find_latest_checkpoint()
 
         # Train
         print("\nStarting training...")

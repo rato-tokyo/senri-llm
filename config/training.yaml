@@ -54,3 +54,7 @@ optimization:
 misc:
   seed: 42
   dataloader_num_workers: 2
+
+  # Fresh start: delete existing checkpoints and start training from scratch
+  # Set to true when code changes require retraining (e.g., bug fixes)
+  fresh_start: true

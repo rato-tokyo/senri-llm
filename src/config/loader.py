@@ -192,6 +192,11 @@ class ConfigManager:
         """Get random seed."""
         return self._training["misc"]["seed"]
 
+    @property
+    def fresh_start(self) -> bool:
+        """Get fresh_start flag (delete checkpoints and start from scratch)."""
+        return self._training["misc"].get("fresh_start", False)
+
     def to_training_config(self):
         """
         Convert to TrainingConfig dataclass.
@@ -228,6 +233,7 @@ class ConfigManager:
             fp16=self.fp16,
             seed=self.seed,
             dataloader_num_workers=self._training["misc"]["dataloader_num_workers"],
+            fresh_start=self.fresh_start,
             memory_layer_lr_multiplier=self._training["training"][
                 "memory_layer_lr_multiplier"
             ],

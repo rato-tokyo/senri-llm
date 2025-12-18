@@ -43,6 +43,9 @@ class TrainingConfig:
     seed: int = 42
     dataloader_num_workers: int = 2
 
+    # Fresh start: delete checkpoints and train from scratch
+    fresh_start: bool = False
+
     # Optional: differential learning rate
     memory_layer_lr_multiplier: float = 1.0  # Set >1 to train memory layers faster
 
