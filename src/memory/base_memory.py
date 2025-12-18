@@ -200,13 +200,13 @@ class TensorMemory(nn.Module):
 
             # Compute actual energy retained
             cleaned_energy = S_cleaned.pow(2).sum(dim=-1)
-            energy_retained = (cleaned_energy / (total_energy.squeeze(-1) + self.eps)).mean().item()
+            energy_retained = (
+                (cleaned_energy / (total_energy.squeeze(-1) + self.eps)).mean().item()
+            )
 
             # Reconstruct memory matrix
             # M = U @ diag(S) @ Vh
-            M_cleaned = torch.einsum(
-                "bik,bk,bkj->bij", U, S_cleaned, Vh
-            )
+            M_cleaned = torch.einsum("bik,bk,bkj->bij", U, S_cleaned, Vh)
 
             # Reshape back
             self.M = M_cleaned.view(batch_size, num_heads, d1, d2)

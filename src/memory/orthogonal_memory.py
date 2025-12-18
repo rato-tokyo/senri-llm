@@ -322,13 +322,19 @@ class OrthogonalBasisMemory(nn.Module):
                 # Compute energy ratios
                 energy = S.pow(2)
                 total_energy = energy.sum(dim=-1, keepdim=True)
-                cumulative_energy_ratio = energy.cumsum(dim=-1) / (total_energy + self.eps)
+                cumulative_energy_ratio = energy.cumsum(dim=-1) / (
+                    total_energy + self.eps
+                )
 
                 # Determine rank to retain
                 if max_rank is not None:
                     retained_rank = min(max_rank, S.shape[-1])
-                    rank_mask = torch.arange(S.shape[-1], device=S.device) < retained_rank
-                    rank_mask = rank_mask.unsqueeze(0).expand(batch_size * num_heads, -1)
+                    rank_mask = (
+                        torch.arange(S.shape[-1], device=S.device) < retained_rank
+                    )
+                    rank_mask = rank_mask.unsqueeze(0).expand(
+                        batch_size * num_heads, -1
+                    )
                 else:
                     rank_mask = cumulative_energy_ratio <= energy_threshold
                     rank_mask[:, 0] = True
@@ -343,7 +349,11 @@ class OrthogonalBasisMemory(nn.Module):
 
                 # Compute actual energy retained
                 cleaned_energy = S_cleaned.pow(2).sum(dim=-1)
-                energy_retained = (cleaned_energy / (total_energy.squeeze(-1) + self.eps)).mean().item()
+                energy_retained = (
+                    (cleaned_energy / (total_energy.squeeze(-1) + self.eps))
+                    .mean()
+                    .item()
+                )
 
                 # Reconstruct memory matrix
                 M_cleaned = torch.einsum("bik,bk,bkj->bij", U, S_cleaned, Vh)
@@ -352,12 +362,14 @@ class OrthogonalBasisMemory(nn.Module):
                 self.M[:, :, basis_idx] = M_cleaned.view(batch_size, num_heads, d1, d2)
 
                 # Record stats
-                per_basis_stats.append({
-                    "basis_index": basis_idx,
-                    "original_rank": original_rank,
-                    "retained_rank": retained_rank_value,
-                    "energy_retained": energy_retained,
-                })
+                per_basis_stats.append(
+                    {
+                        "basis_index": basis_idx,
+                        "original_rank": original_rank,
+                        "retained_rank": retained_rank_value,
+                        "energy_retained": energy_retained,
+                    }
+                )
 
                 total_original_rank += original_rank
                 total_retained_rank += retained_rank_value
@@ -366,8 +378,14 @@ class OrthogonalBasisMemory(nn.Module):
         num_cleaned = len(basis_indices)
         return OrthogonalSVDCleaningStats(
             num_basis_cleaned=num_cleaned,
-            average_original_rank=total_original_rank / num_cleaned if num_cleaned > 0 else 0.0,
-            average_retained_rank=total_retained_rank / num_cleaned if num_cleaned > 0 else 0.0,
-            average_energy_retained=total_energy_retained / num_cleaned if num_cleaned > 0 else 0.0,
+            average_original_rank=total_original_rank / num_cleaned
+            if num_cleaned > 0
+            else 0.0,
+            average_retained_rank=total_retained_rank / num_cleaned
+            if num_cleaned > 0
+            else 0.0,
+            average_energy_retained=total_energy_retained / num_cleaned
+            if num_cleaned > 0
+            else 0.0,
             per_basis_stats=per_basis_stats,
         )
