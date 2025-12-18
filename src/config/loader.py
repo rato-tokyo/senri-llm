@@ -203,6 +203,12 @@ class ConfigManager:
             save_steps=self._training["evaluation"]["save_steps"],
             save_total_limit=self._training["evaluation"]["save_total_limit"],
             logging_steps=self._training["evaluation"]["logging_steps"],
+            early_stopping_patience=self._training["evaluation"].get(
+                "early_stopping_patience", 2
+            ),
+            early_stopping_threshold=self._training["evaluation"].get(
+                "early_stopping_threshold", 0.0
+            ),
             gradient_checkpointing=self.gradient_checkpointing,
             fp16=self.fp16,
             seed=self.seed,

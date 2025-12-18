@@ -28,6 +28,11 @@ evaluation:
   save_total_limit: 3
   logging_steps: 10
 
+  # Early stopping
+  # Set to 0 to disable early stopping
+  early_stopping_patience: 2
+  early_stopping_threshold: 0.0  # Minimum improvement to reset patience
+
 # Memory optimization
 optimization:
   gradient_checkpointing: true

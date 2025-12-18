@@ -31,6 +31,10 @@ class TrainingConfig:
     save_total_limit: int = 3
     logging_steps: int = 10
 
+    # Early stopping (set to 0 to disable)
+    early_stopping_patience: int = 2
+    early_stopping_threshold: float = 0.0
+
     # Memory optimization
     gradient_checkpointing: bool = True
     fp16: bool = True

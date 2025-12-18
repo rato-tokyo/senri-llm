@@ -9,6 +9,7 @@ from transformers import (
     AutoTokenizer,
     Trainer,
     DataCollatorForLanguageModeling,
+    EarlyStoppingCallback,
     PreTrainedTokenizerBase,
 )
 
@@ -151,6 +152,17 @@ class SenriTrainer:
             mlm=False,
         )
 
+        # Setup callbacks
+        callbacks = []
+        if self.config.early_stopping_patience > 0:
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping_patience=self.config.early_stopping_patience,
+                    early_stopping_threshold=self.config.early_stopping_threshold,
+                )
+            )
+            print(f"  Early stopping: patience={self.config.early_stopping_patience}")
+
         # Create trainer
         trainer = Trainer(
             model=self.model,
@@ -158,6 +170,7 @@ class SenriTrainer:
             train_dataset=tokenized_dataset["train"],
             eval_dataset=tokenized_dataset["validation"],
             data_collator=data_collator,
+            callbacks=callbacks if callbacks else None,
         )
 
         # Train
