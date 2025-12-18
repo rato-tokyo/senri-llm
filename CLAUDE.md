@@ -2,7 +2,55 @@
 
 ## Project Overview
 
-Senri-LLMは、Qwen2.5-0.5Bをベースに、直交基底ルーティングによるInfini Attentionを実装するプロジェクトです。
+Senri-LLMは、**SmolLM-135M**をベースに、直交基底ルーティングによるInfini Attentionを実装するプロジェクトです。
+
+## Small Model Philosophy - 重要
+
+### なぜ小型モデルを選択するのか
+
+Senriアーキテクチャは、**コンテキスト長に関係なく固定サイズのメモリ**を使用します。
+
+```python
+# メモリサイズは固定（コンテキスト長に依存しない）
+M = torch.zeros(batch, heads, head_dim, head_dim)  # 学習時
+M = torch.zeros(batch, heads, hidden_size, head_dim, head_dim)  # 推論時
+```
+
+これにより、**たとえ16M tokensのコンテキストであっても**、最終的には：
+- テンソル積メモリ（固定サイズ）
+- SWAウィンドウ（固定サイズ）
+
+に収まるため、**理論上は小型モデルでも超長文コンテキストを処理可能**です。
+
+### 複雑なタスク vs コンテキスト記憶
+
+| 観点 | 大型モデル | 小型モデル |
+|------|-----------|-----------|
+| 複雑な推論 | 得意 | 限定的 |
+| コンテキスト記憶 | 得意 | **Senriで対応可能** |
+| 学習コスト | 高い | 低い |
+| 実験速度 | 遅い | 速い |
+
+**重要**: 「長文を記憶できるか」と「複雑な推論ができるか」は別の能力です。
+Senriの目標は**コンテキスト記憶能力の証明**であり、複雑なタスクは対象外です。
+
+### 小型モデルでの長文記憶実証の意義
+
+1. **効率的な実験**: Colab T4で十分な学習・評価が可能
+2. **アーキテクチャの検証**: メモリ機構が正しく動作することを証明
+3. **スケーラビリティの示唆**: 小型で動けば大型でも動く
+
+### 学習コンテキスト長の重要性
+
+```
+メモリを活用する学習のためには:
+  学習コンテキスト長 > SWAウィンドウサイズ
+
+現在の設定:
+  max_length: 2048 tokens (学習)
+  sliding_window_size: 1024 tokens (SWA)
+  → メモリが積極的に使用される
+```
 
 ## Architecture Specification
 
@@ -13,24 +61,34 @@ Senri-LLMは、Qwen2.5-0.5Bをベースに、直交基底ルーティングに�
 推論時: 直交基底ベースの動的テンソル積選択
 ```
 
-### Layer Structure (24 layers total)
+### Base Model: SmolLM-135M
+
+| 項目 | 値 |
+|------|-----|
+| パラメータ数 | 135M |
+| hidden_size | 576 |
+| num_layers | 30 |
+| num_attention_heads | 9 |
+| num_key_value_heads | 3 (GQA) |
+| head_dim | 64 |
+| vocab_size | 49,152 |
+
+### Layer Structure (30 layers total)
 
 ```
-Layer 0-11:  SWA only (Lower Decoder)
-Layer 12:    SWA + Senri Memory (Group 1)
-Layer 13-15: SWA only
-Layer 16:    SWA + Senri Memory (Group 2)
-Layer 17-19: SWA only
-Layer 20:    SWA + Senri Memory (Group 3)
-Layer 21-23: SWA only
+Layer 0-9:   SWA only (Lower Decoder)
+Layer 10:    SWA + Senri Memory (Group 1)
+Layer 11-19: SWA only
+Layer 20:    SWA + Senri Memory (Group 2)
+Layer 21-29: SWA only
 ```
 
 ### Memory Layer Configuration
 
-- `num_memory_layers`: 3 (Senri Memoryを持つレイヤー数)
-- `first_memory_layer`: 12 (最初のメモリレイヤー)
-- `memory_layer_interval`: 4 (メモリレイヤー間隔)
-- メモリレイヤーのインデックス: [12, 16, 20]
+- `num_memory_layers`: 2 (Senri Memoryを持つレイヤー数)
+- `first_memory_layer`: 10 (最初のメモリレイヤー)
+- `memory_layer_interval`: 10 (メモリレイヤー間隔)
+- メモリレイヤーのインデックス: [10, 20]
 
 ### Memory Sharing Policy
 
@@ -268,8 +326,8 @@ print(f"Top singular values: {stats.singular_values_before[0, :5]}")
 
 ### HuggingFace Compatibility
 
-- `SenriConfig`: `Qwen2Config`を継承
-- `SenriForCausalLM`: `Qwen2ForCausalLM`の構造を踏襲
+- `SenriConfig`: `LlamaConfig`を継承（SmolLM, Llamaファミリーと互換）
+- `SenriForCausalLM`: Llamaアーキテクチャの構造を踏襲
 - `from_pretrained`/`save_pretrained`完全対応
 - `generate()`メソッドでの推論対応
 
@@ -277,16 +335,16 @@ print(f"Top singular values: {stats.singular_values_before[0, :5]}")
 
 ```python
 # src/configuration_senri.py
-class SenriConfig(Qwen2Config):
+class SenriConfig(LlamaConfig):
     model_type = "senri"
 
     # Senri specific
-    sliding_window_size: int = 4096
+    sliding_window_size: int = 1024
     chunk_size: int = 64
     top_k_memories: int = 64
-    num_memory_layers: int = 3
-    first_memory_layer: int = 12
-    memory_layer_interval: int = 4
+    num_memory_layers: int = 2
+    first_memory_layer: int = 10
+    memory_layer_interval: int = 10
 
 # src/memory/tensor_memory.py
 class TensorMemory:
@@ -412,20 +470,20 @@ def forward(
 1. `TensorMemory`: 更新と検索の正確性
 2. `OrthogonalBasisMemory`: 基底割り当ての正確性
 3. `SenriAttention`: 学習/推論モードの切り替え
-4. `SenriForCausalLM`: Qwen2.5重みのロード
+4. `SenriForCausalLM`: SmolLM重みのロード
 
 ### Shape Tests
 ```python
 def test_tensor_memory_shapes():
-    memory = TensorMemory(hidden_size=896, num_heads=14)
-    q = torch.randn(2, 14, 100, 64)
-    k = torch.randn(2, 14, 100, 64)
-    v = torch.randn(2, 14, 100, 64)
+    memory = TensorMemory(hidden_size=576, num_heads=9)
+    q = torch.randn(2, 9, 100, 64)
+    k = torch.randn(2, 9, 100, 64)
+    v = torch.randn(2, 9, 100, 64)
 
     memory.update(k, v)
     output = memory.retrieve(q)
 
-    assert output.shape == (2, 14, 100, 64)
+    assert output.shape == (2, 9, 100, 64)
 ```
 
 ## Git Workflow

@@ -5,7 +5,9 @@
 dataset:
   name: "wikitext"
   config: "wikitext-2-raw-v1"
-  max_length: 512
+  # Context length must exceed SWA window (1024) to train memory
+  # 2048 tokens ensures memory is actively used during training
+  max_length: 2048
 
 # Training hyperparameters
 training:

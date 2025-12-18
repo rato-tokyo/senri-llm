@@ -1,13 +1,18 @@
 """
-Convert Qwen2.5-0.5B weights to Senri model.
+Convert base model weights to Senri model.
 
-This script loads pre-trained Qwen2.5-0.5B weights and transfers them
+This script loads pre-trained model weights (SmolLM, Llama, etc.) and transfers them
 to the Senri model architecture. The Senri model adds memory layers
-on top of the base Qwen architecture.
+on top of the base architecture.
+
+Supported base models:
+- SmolLM-135M (HuggingFaceTB/SmolLM-135M) - Recommended for experiments
+- SmolLM-360M (HuggingFaceTB/SmolLM-360M)
+- Any LlamaConfig-based model
 
 Usage:
-    python scripts/convert_qwen_to_senri.py --output_dir ./senri-0.5b
-    python scripts/convert_qwen_to_senri.py --model_name Qwen/Qwen2.5-1.5B --output_dir ./senri-1.5b
+    python scripts/convert_to_senri.py --output_dir ./senri-135m
+    python scripts/convert_to_senri.py --model_name HuggingFaceTB/SmolLM-360M --output_dir ./senri-360m
 """
 
 import argparse
@@ -24,32 +29,14 @@ from src.configuration_senri import SenriConfig
 from src.modeling_senri import SenriForCausalLM
 
 
-def get_weight_mapping():
-    """
-    Get mapping from Qwen2 weight names to Senri weight names.
-
-    Returns:
-        dict: Mapping of Qwen2 -> Senri weight names
-    """
-    # Most weights have the same names since Senri is based on Qwen2 architecture
-    # The main differences are in attention layers with Senri Memory
-    return {
-        # Embeddings
-        "model.embed_tokens.weight": "model.embed_tokens.weight",
-        "model.norm.weight": "model.norm.weight",
-        "lm_head.weight": "lm_head.weight",
-        # Layer weights are mapped dynamically
-    }
-
-
 def convert_layer_weights(
-    qwen_state_dict: dict, layer_idx: int, has_memory: bool
+    base_state_dict: dict, layer_idx: int, has_memory: bool
 ) -> dict:
     """
     Convert weights for a single decoder layer.
 
     Args:
-        qwen_state_dict: Qwen2 state dict
+        base_state_dict: Base model state dict
         layer_idx: Layer index
         has_memory: Whether this layer has Senri Memory
 
@@ -60,101 +47,115 @@ def convert_layer_weights(
     prefix = f"model.layers.{layer_idx}"
 
     # Layer norm weights
-    converted[f"{prefix}.input_layernorm.weight"] = qwen_state_dict[
+    converted[f"{prefix}.input_layernorm.weight"] = base_state_dict[
         f"{prefix}.input_layernorm.weight"
     ]
-    converted[f"{prefix}.post_attention_layernorm.weight"] = qwen_state_dict[
+    converted[f"{prefix}.post_attention_layernorm.weight"] = base_state_dict[
         f"{prefix}.post_attention_layernorm.weight"
     ]
 
     # MLP weights
-    converted[f"{prefix}.mlp.gate_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.mlp.gate_proj.weight"] = base_state_dict[
         f"{prefix}.mlp.gate_proj.weight"
     ]
-    converted[f"{prefix}.mlp.up_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.mlp.up_proj.weight"] = base_state_dict[
         f"{prefix}.mlp.up_proj.weight"
     ]
-    converted[f"{prefix}.mlp.down_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.mlp.down_proj.weight"] = base_state_dict[
         f"{prefix}.mlp.down_proj.weight"
     ]
 
-    # Attention weights
-    # For layers with Senri Memory, the attention structure is different
-    # but the core Q, K, V, O projections are the same
-    converted[f"{prefix}.self_attn.q_proj.weight"] = qwen_state_dict[
+    # Attention weights - Q, K, V, O projections
+    converted[f"{prefix}.self_attn.q_proj.weight"] = base_state_dict[
         f"{prefix}.self_attn.q_proj.weight"
     ]
-    converted[f"{prefix}.self_attn.q_proj.bias"] = qwen_state_dict[
-        f"{prefix}.self_attn.q_proj.bias"
-    ]
-    converted[f"{prefix}.self_attn.k_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.self_attn.k_proj.weight"] = base_state_dict[
         f"{prefix}.self_attn.k_proj.weight"
     ]
-    converted[f"{prefix}.self_attn.k_proj.bias"] = qwen_state_dict[
-        f"{prefix}.self_attn.k_proj.bias"
-    ]
-    converted[f"{prefix}.self_attn.v_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.self_attn.v_proj.weight"] = base_state_dict[
         f"{prefix}.self_attn.v_proj.weight"
     ]
-    converted[f"{prefix}.self_attn.v_proj.bias"] = qwen_state_dict[
-        f"{prefix}.self_attn.v_proj.bias"
-    ]
-    converted[f"{prefix}.self_attn.o_proj.weight"] = qwen_state_dict[
+    converted[f"{prefix}.self_attn.o_proj.weight"] = base_state_dict[
         f"{prefix}.self_attn.o_proj.weight"
     ]
+
+    # Handle biases if present (SmolLM doesn't have attention biases, but some models do)
+    for proj in ["q_proj", "k_proj", "v_proj"]:
+        bias_key = f"{prefix}.self_attn.{proj}.bias"
+        if bias_key in base_state_dict:
+            converted[bias_key] = base_state_dict[bias_key]
 
     return converted
 
 
-def convert_qwen_to_senri(
-    model_name: str = "Qwen/Qwen2.5-0.5B",
-    output_dir: str = "./senri-0.5b",
+def convert_to_senri(
+    model_name: str = "HuggingFaceTB/SmolLM-135M",
+    output_dir: str = "./senri-135m",
     device: str = "cpu",
 ) -> SenriForCausalLM:
     """
-    Convert Qwen2.5 model to Senri model.
+    Convert base model to Senri model.
 
     Args:
-        model_name: HuggingFace model name for Qwen2.5
+        model_name: HuggingFace model name
         output_dir: Directory to save the converted model
         device: Device to use for conversion
 
     Returns:
         SenriForCausalLM: Converted Senri model
     """
-    print(f"Loading Qwen model: {model_name}")
-    qwen_model = AutoModelForCausalLM.from_pretrained(
+    print(f"Loading base model: {model_name}")
+    base_model = AutoModelForCausalLM.from_pretrained(
         model_name,
         torch_dtype=torch.float32,
         device_map=device,
     )
-    qwen_config = qwen_model.config
-    qwen_state_dict = qwen_model.state_dict()
+    base_config = base_model.config
+    base_state_dict = base_model.state_dict()
 
-    print(f"Qwen config: {qwen_config}")
+    print(f"Base config: hidden_size={base_config.hidden_size}, "
+          f"num_layers={base_config.num_hidden_layers}, "
+          f"num_heads={base_config.num_attention_heads}")
 
-    # Create Senri config based on Qwen config
+    # Calculate head_dim
+    head_dim = base_config.hidden_size // base_config.num_attention_heads
+
+    # Determine memory layer configuration based on model size
+    num_layers = base_config.num_hidden_layers
+    if num_layers <= 12:
+        # Small model: 2 memory layers at 1/3 and 2/3
+        num_memory_layers = 2
+        first_memory_layer = num_layers // 3
+        memory_layer_interval = num_layers // 3
+    else:
+        # Larger model: 3 memory layers
+        num_memory_layers = 3
+        first_memory_layer = num_layers // 2
+        memory_layer_interval = num_layers // 6
+
+    # Create Senri config based on base config
     senri_config = SenriConfig(
-        vocab_size=qwen_config.vocab_size,
-        hidden_size=qwen_config.hidden_size,
-        intermediate_size=qwen_config.intermediate_size,
-        num_hidden_layers=qwen_config.num_hidden_layers,
-        num_attention_heads=qwen_config.num_attention_heads,
-        num_key_value_heads=qwen_config.num_key_value_heads,
-        max_position_embeddings=qwen_config.max_position_embeddings,
-        rms_norm_eps=qwen_config.rms_norm_eps,
-        rope_theta=qwen_config.rope_theta,
-        # Senri specific - adjust based on model size
-        sliding_window_size=4096,
+        vocab_size=base_config.vocab_size,
+        hidden_size=base_config.hidden_size,
+        intermediate_size=base_config.intermediate_size,
+        num_hidden_layers=base_config.num_hidden_layers,
+        num_attention_heads=base_config.num_attention_heads,
+        num_key_value_heads=getattr(base_config, 'num_key_value_heads', base_config.num_attention_heads),
+        max_position_embeddings=base_config.max_position_embeddings,
+        rms_norm_eps=getattr(base_config, 'rms_norm_eps', 1e-6),
+        rope_theta=getattr(base_config, 'rope_theta', 10000.0),
+        # Senri specific
+        sliding_window_size=min(2048, base_config.max_position_embeddings),
         chunk_size=64,
-        top_k_memories=64,
-        num_memory_layers=3,
-        first_memory_layer=qwen_config.num_hidden_layers // 2,  # Start at middle
-        memory_layer_interval=qwen_config.num_hidden_layers // 6,  # Spread evenly
+        top_k_memories=min(64, base_config.hidden_size),
+        num_memory_layers=num_memory_layers,
+        first_memory_layer=first_memory_layer,
+        memory_layer_interval=memory_layer_interval,
     )
 
     print("Senri config created")
     print(f"  Memory layers: {senri_config.get_memory_layer_indices()}")
+    print(f"  Head dim: {head_dim}")
 
     # Create Senri model
     print("Creating Senri model...")
@@ -165,16 +166,22 @@ def convert_qwen_to_senri(
     senri_state_dict = {}
 
     # Embeddings and final norm
-    senri_state_dict["model.embed_tokens.weight"] = qwen_state_dict[
+    senri_state_dict["model.embed_tokens.weight"] = base_state_dict[
         "model.embed_tokens.weight"
     ]
-    senri_state_dict["model.norm.weight"] = qwen_state_dict["model.norm.weight"]
-    senri_state_dict["lm_head.weight"] = qwen_state_dict["lm_head.weight"]
+    senri_state_dict["model.norm.weight"] = base_state_dict["model.norm.weight"]
+
+    # LM head (may be tied to embeddings)
+    if "lm_head.weight" in base_state_dict:
+        senri_state_dict["lm_head.weight"] = base_state_dict["lm_head.weight"]
+    else:
+        # Tied embeddings
+        senri_state_dict["lm_head.weight"] = base_state_dict["model.embed_tokens.weight"]
 
     # Convert each layer
-    for layer_idx in range(qwen_config.num_hidden_layers):
+    for layer_idx in range(base_config.num_hidden_layers):
         has_memory = senri_config.is_memory_layer(layer_idx)
-        layer_weights = convert_layer_weights(qwen_state_dict, layer_idx, has_memory)
+        layer_weights = convert_layer_weights(base_state_dict, layer_idx, has_memory)
         senri_state_dict.update(layer_weights)
 
         if has_memory:
@@ -190,8 +197,10 @@ def convert_qwen_to_senri(
 
     if missing_keys:
         print("  Missing keys (expected for new Senri components):")
-        for key in missing_keys:
+        for key in missing_keys[:10]:  # Show first 10
             print(f"    - {key}")
+        if len(missing_keys) > 10:
+            print(f"    ... and {len(missing_keys) - 10} more")
 
     if unexpected_keys:
         print("  Unexpected keys:")
@@ -216,15 +225,15 @@ def convert_qwen_to_senri(
 
 def verify_conversion(
     senri_model: SenriForCausalLM,
-    model_name: str = "Qwen/Qwen2.5-0.5B",
+    model_name: str = "HuggingFaceTB/SmolLM-135M",
     device: str = "cpu",
 ):
     """
-    Verify the conversion by comparing outputs.
+    Verify the conversion by testing model outputs.
 
     Args:
         senri_model: Converted Senri model
-        model_name: Original Qwen model name
+        model_name: Original model name for tokenizer
         device: Device to use
     """
     print("\nVerifying conversion...")
@@ -263,17 +272,17 @@ def verify_conversion(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert Qwen2.5 to Senri model")
+    parser = argparse.ArgumentParser(description="Convert base model to Senri model")
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen2.5-0.5B",
-        help="HuggingFace model name for Qwen2.5",
+        default="HuggingFaceTB/SmolLM-135M",
+        help="HuggingFace model name (default: SmolLM-135M)",
     )
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="./senri-0.5b",
+        default="./senri-135m",
         help="Directory to save the converted model",
     )
     parser.add_argument(
@@ -285,12 +294,12 @@ def main():
     parser.add_argument(
         "--verify",
         action="store_true",
-        help="Verify conversion by comparing outputs",
+        help="Verify conversion by testing outputs",
     )
 
     args = parser.parse_args()
 
-    senri_model = convert_qwen_to_senri(
+    senri_model = convert_to_senri(
         model_name=args.model_name,
         output_dir=args.output_dir,
         device=args.device,

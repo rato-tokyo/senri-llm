@@ -1,4 +1,4 @@
-"""Senri model implementation based on Qwen2."""
+"""Senri model implementation based on Llama architecture (compatible with SmolLM, Llama)."""
 
 from typing import Optional, Tuple, Union
 

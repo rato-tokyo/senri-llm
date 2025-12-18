@@ -1,14 +1,17 @@
 """Senri model configuration."""
 
-from transformers import Qwen2Config
+from transformers import LlamaConfig
 
 
-class SenriConfig(Qwen2Config):
+class SenriConfig(LlamaConfig):
     """
     Configuration class for Senri model.
 
-    Extends Qwen2Config with Senri-specific parameters for
+    Extends LlamaConfig with Senri-specific parameters for
     orthogonal basis routed infinite attention.
+
+    Note: SmolLM-135M uses LlamaConfig architecture, making this
+    compatible with both SmolLM and Llama-family models.
     """
 
     model_type = "senri"

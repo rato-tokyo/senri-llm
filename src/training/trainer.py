@@ -54,7 +54,7 @@ class SenriTrainer:
 
     def setup_model(self) -> SenriForCausalLM:
         """Load or convert model."""
-        from scripts.convert_qwen_to_senri import convert_qwen_to_senri
+        from scripts.convert_to_senri import convert_to_senri
 
         model_path = Path(self.config.output_dir) / "senri-model"
 
@@ -65,7 +65,7 @@ class SenriTrainer:
         else:
             print(f"Converting from {self.config.model_name}")
             device_str = "cuda" if self.device.type == "cuda" else "cpu"
-            self.model = convert_qwen_to_senri(
+            self.model = convert_to_senri(
                 model_name=self.config.model_name,
                 output_dir=str(model_path),
                 device=device_str,

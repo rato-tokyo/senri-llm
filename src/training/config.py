@@ -8,7 +8,7 @@ class TrainingConfig:
     """Configuration for Senri training."""
 
     # Model
-    model_name: str = "Qwen/Qwen2.5-0.5B"
+    model_name: str = "HuggingFaceTB/SmolLM-135M"
     output_dir: str = "./outputs"
 
     # Dataset
