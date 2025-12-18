@@ -4,7 +4,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, GenerationMixin
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast,
@@ -16,7 +16,7 @@ from .modules import SenriRMSNorm
 from .decoder import SenriDecoderLayer
 
 
-class SenriPreTrainedModel(PreTrainedModel):
+class SenriPreTrainedModel(PreTrainedModel, GenerationMixin):
     """Base class for Senri models."""
 
     config_class = SenriConfig  # type: ignore[assignment]
