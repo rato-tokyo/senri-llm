@@ -253,13 +253,132 @@ new-llmが論文と異なる設計でも動作する理由:
 
 ---
 
-## 10. 動作確認状況
+## 10. なぜnew-llmが安定して動作するのか - 実装面の違い
 
-ユーザーによると、new-llmは動作していたとのこと。
-これは以下を示唆:
+ユーザーによると、new-llmは紆余曲折あったものの終盤は比較的問題なく動作していたとのこと。
+以下の実装面の違いが安定性に寄与していると考えられます。
 
-1. **Linear Attention + メモリの組み合わせは実用的**
-2. **完全detachでもメモリは学習に貢献**
-3. **独自設計でもInfini-Attentionの恩恵を受けられる**
+### 10.1 勾配クリッピング（重要）
 
-senri-llmは論文準拠を優先するが、動作しない場合はnew-llmの設計を参考にデバッグ可能。
+**new-llm**: 勾配クリッピングがデフォルトで有効
+```python
+# src/utils/training.py
+def train_epoch(..., grad_clip: float = 1.0):
+    ...
+    if grad_clip > 0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+```
+
+**senri-llm**: 勾配クリッピング未設定
+- HuggingFace Trainerを使用しているが、`max_grad_norm`が明示的に設定されていない
+- デフォルトは1.0だが、確認が必要
+
+### 10.2 メモリ更新値の正規化（重要）
+
+**new-llm**: バッチ・シーケンスで正規化
+```python
+# memory/base.py
+memory_update = torch.einsum('bsd,bse->de', sigma_k, values) / (batch_size * seq_len)
+z_update = sigma_k.sum(dim=(0, 1)) / batch_size
+```
+
+**senri-llm**: 正規化なし（生の累積）
+```python
+# base_memory.py
+delta_M = torch.einsum("bhsd,bhse->bhde", values, sigma_keys)
+self.M = self.M.detach() + delta_M  # 正規化なし
+```
+
+**影響**:
+- senri-llmではシーケンス長が長いほどメモリ更新値が大きくなる
+- 数値的に不安定になりやすい
+
+### 10.3 メモリ形状の違い
+
+**new-llm**: バッチ間で共有 `[d, d]`
+- 単一のメモリ行列を全バッチで共有
+- 更新値が平均化される
+
+**senri-llm**: バッチごとに独立 `[batch, heads, d, d]`
+- 各バッチが独自のメモリを持つ
+- マルチヘッド構造（heads次元あり）
+- メモリサイズが大きい
+
+### 10.4 完全detach vs 部分detach
+
+**new-llm**: 完全detach
+```python
+self.memories[idx] = (memory + memory_update).detach()  # 結果全体をdetach
+```
+
+**senri-llm**: 部分detach（累積のみ）
+```python
+self.M = self.M.detach() + delta_M  # 累積をdetach、delta_Mには勾配あり
+```
+
+**影響**:
+- new-llm: メモリへの勾配が完全に流れない（安定）
+- senri-llm: 現在の更新には勾配が流れる（学習効率は高いが不安定の可能性）
+
+### 10.5 Linear Attention vs Softmax Attention
+
+**new-llm**: ローカルAttentionがLinear Attention
+```python
+# 累積和による効率的な計算
+kv_cumsum = torch.cumsum(kv, dim=1)
+```
+- 数値的に安定（softmax不要）
+- 全ての値が正（ELU+1）
+
+**senri-llm**: ローカルAttentionがSoftmax
+```python
+attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32)
+```
+- `-inf`マスクの処理が必要
+- fp16でのオーバーフローの可能性
+
+---
+
+## 11. senri-llmへの改善提案
+
+上記分析から、senri-llmの安定性向上のために以下を検討:
+
+### 高優先度
+
+1. **メモリ更新値の正規化**
+   ```python
+   # base_memory.py
+   delta_M = torch.einsum("bhsd,bhse->bhde", values, sigma_keys)
+   delta_M = delta_M / seq_len  # シーケンス長で正規化
+   ```
+
+2. **勾配クリッピングの明示的確認**
+   - HuggingFace Trainerのデフォルトは1.0のはずだが確認
+
+### 中優先度
+
+3. **fp32でのattention計算**（既に実装済み）
+   ```python
+   attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32)
+   ```
+
+4. **メモリ更新の完全detach化**（安定性優先の場合）
+   ```python
+   self.M = (self.M + delta_M).detach()
+   ```
+
+---
+
+## 12. まとめ
+
+new-llmが安定して動作する主な理由:
+
+| 要因 | new-llm | senri-llm | 影響 |
+|------|---------|-----------|------|
+| **メモリ更新正規化** | ✅ `/batch*seq` | ❌ なし | **高** |
+| **勾配クリッピング** | ✅ 1.0 | ⚠️ 要確認 | 高 |
+| **メモリ勾配** | 完全detach | 部分detach | 中 |
+| **ローカルAttention** | Linear | Softmax | 中 |
+| **メモリ形状** | 共有 `[d,d]` | 独立 `[b,h,d,d]` | 低 |
+
+**結論**: senri-llmのNaN問題は、**メモリ更新値の正規化**を追加することで解決できる可能性が高い。

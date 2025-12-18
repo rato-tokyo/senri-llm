@@ -119,6 +119,9 @@ class TensorMemory(nn.Module):
         # This ensures z (sum of keys) is always positive
         sigma_keys = elu_plus_one(keys)
 
+        # Get sequence length for normalization
+        seq_len = keys.shape[2]
+
         # Outer product: v ⊗ σ(k) -> [batch, heads, head_dim, head_dim]
         # Sum over sequence dimension
         # values: [b, h, s, d] -> [b, h, d, s]
@@ -126,13 +129,18 @@ class TensorMemory(nn.Module):
         # einsum: bhs d, bhs e -> bh de (sum over s)
         delta_M = torch.einsum("bhsd,bhse->bhde", values, sigma_keys)
 
+        # Normalize by sequence length for numerical stability
+        # This prevents memory values from exploding with longer sequences
+        # (Following new-llm's approach which normalizes by batch_size * seq_len)
+        delta_M = delta_M / seq_len
+
         # Detach accumulated state but keep gradient for current update
         # This prevents gradient explosion from accumulating across training samples
         # while still allowing learning within each sample
         self.M = self.M.detach() + delta_M
 
-        # Sum activated keys for normalization
-        delta_z = sigma_keys.sum(dim=2)  # [batch, heads, head_dim]
+        # Sum activated keys for normalization (also normalize)
+        delta_z = sigma_keys.sum(dim=2) / seq_len  # [batch, heads, head_dim]
         self.z = self.z.detach() + delta_z
 
     def retrieve(
