@@ -60,6 +60,102 @@ Layer 12, 16, 20: SharedSenriMemory (共有)
 - **SWA (Local Attention)**: RoPE使用
 - **Senri Memory (Global Attention)**: NoPE (No Positional Encoding)
 
+## Training vs Inference Mode - 重要
+
+**Senriは `model.train()` と `model.eval()` で挙動が大きく異なる。**
+
+### 比較表
+
+| 項目 | 学習時 (`model.train()`) | 推論時 (`model.eval()`) |
+|------|-------------------------|------------------------|
+| **メモリ構造** | 単一テンソル積メモリ (`TensorMemory`) | 複数メモリ + 直交基底ルーティング (`OrthogonalBasisMemory`) |
+| **メモリ形状** | `[batch, heads, head_dim, head_dim]` | `[batch, heads, hidden_size, head_dim, head_dim]` |
+| **メモリ更新** | 単純累積: `M = M + v ⊗ k` | Delta rule: `M = M + (v - retrieve(k)) ⊗ k` |
+| **Key割り当て** | なし（全てのKVが同一メモリへ） | 基底ルーティング: `argmax(|k|)` で分散 |
+| **Query検索** | 全メモリから一括検索 | Top-k メモリ選択 + 重み付き統合 |
+| **勾配計算** | あり | なし (`torch.no_grad()`) |
+| **目的** | 重要度の学習、パラメータ更新 | 効率的な長文処理、重複除去 |
+
+### 詳細説明
+
+#### 1. メモリ構造の違い
+
+```python
+# 学習時: 単一メモリ
+M = torch.zeros(batch, heads, head_dim, head_dim)
+
+# 推論時: hidden_size 個の独立メモリ
+M = torch.zeros(batch, heads, hidden_size, head_dim, head_dim)
+```
+
+**理由**: 推論時は超長文を扱うため、単一メモリでは情報が混在しすぎる。直交基底でメモリを分割し、関連情報のみを検索。
+
+#### 2. メモリ更新の違い
+
+```python
+# 学習時: 単純累積（勾配を流すため）
+M = M + outer(v, k)
+
+# 推論時: Delta rule（重複除去）
+v_existing = retrieve(k)      # 既存値を取得
+v_delta = v - v_existing      # 差分を計算
+M = M + outer(v_delta, k)     # 差分のみ追加
+```
+
+**理由**:
+- 学習時は勾配が必要なため、シンプルな累積
+- 推論時は同じ情報の重複蓄積を防ぎ、メモリ効率を向上
+
+#### 3. Key-Valueの割り当て
+
+```python
+# 学習時: 全KVが同一メモリへ
+memory.update(keys, values)  # 単一Mへ追加
+
+# 推論時: 直交基底で分散
+basis_idx = keys.abs().argmax(dim=-1)  # 最大絶対値の次元
+# 各KVペアは対応する基底のメモリへ
+```
+
+**理由**: 推論時は情報を意味的に分離し、検索時に関連メモリのみを参照
+
+#### 4. Query検索の違い
+
+```python
+# 学習時: 全メモリから検索
+output = (M @ q) / (z.T @ q + eps)
+
+# 推論時: Top-k選択 + 重み付き統合
+scores = queries.abs()
+top_k_indices = scores.topk(k=top_k_memories).indices
+output = weighted_sum(retrieve_from_each(top_k_indices))
+```
+
+**理由**: 推論時は関連性の高いメモリのみを使用し、計算効率と精度を両立
+
+### モード切り替えの注意点
+
+```python
+# 正しい使用方法
+model.train()   # 学習モード: TensorMemory使用
+model.eval()    # 推論モード: OrthogonalBasisMemory + Delta rule
+
+# メモリの状態は内部で自動的に切り替わる
+# SenriMemory.training フラグで制御
+```
+
+### なぜ学習/推論で異なる戦略を使うのか？
+
+1. **学習時の要件**:
+   - 勾配を計算可能な形式が必要
+   - シンプルな構造で安定した学習
+   - 短いコンテキストで十分（学習データは通常512〜4K tokens）
+
+2. **推論時の要件**:
+   - 超長文（16M+ tokens）を効率的に処理
+   - 重複情報の蓄積を防止
+   - 関連情報のみを高速に検索
+
 ## Implementation Details
 
 ### Tensor Memory
