@@ -266,19 +266,109 @@ def _save_to_drive(output_dir: str, config_manager: ConfigManager):
         print(f"  Note: Could not save to Google Drive: {e}")
 
 
-def eval_experiment():
-    """Run evaluation experiment."""
+def eval_experiment(model_path: str = None):
+    """
+    Run evaluation experiment with NIAH benchmarks.
+
+    Args:
+        model_path: Path to trained model. If None, uses default output path.
+    """
     print("=" * 50)
     print("Evaluation Experiment")
     print("=" * 50)
 
-    # TODO: Implement evaluation
-    # 1. Load checkpoint
-    # 2. Run RULER benchmark
-    # 3. Run NIAH benchmark
-    # 4. Report results
+    from transformers import AutoTokenizer
+    from src.modeling_senri import SenriForCausalLM
+    from src.evaluation import run_niah_evaluation, run_multi_query_evaluation
 
-    print("Evaluation experiment not yet implemented")
+    config_manager = ConfigManager()
+    eval_config = config_manager.experiment.get("eval", {})
+
+    # Determine model path
+    if model_path is None:
+        model_path = str(Path(config_manager.output_dir) / "senri-trained")
+
+    print(f"\nLoading model from: {model_path}")
+
+    # Check if model exists
+    if not Path(model_path).exists():
+        print(f"ERROR: Model not found at {model_path}")
+        print("Please train the model first with: python scripts/colab.py train")
+        return None
+
+    device = get_device()
+
+    # Load model and tokenizer
+    print("Loading model...")
+    model = SenriForCausalLM.from_pretrained(model_path)
+    model = model.to(device)
+    model.eval()
+
+    print("Loading tokenizer...")
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    # Get evaluation settings from config
+    context_lengths = eval_config.get("context_lengths", [4096, 8192])
+    seed = eval_config.get("seed", 42)
+
+    results = {}
+
+    # Run NIAH evaluation
+    benchmarks = eval_config.get("benchmarks", ["niah"])
+
+    if "niah" in benchmarks:
+        print("\n" + "=" * 60)
+        print("Running Single-NIAH Evaluation")
+        print("=" * 60)
+
+        niah_config = eval_config.get("niah", {})
+        depth_percentages = niah_config.get(
+            "depth_percentages", [0.0, 0.25, 0.5, 0.75, 1.0]
+        )
+        num_samples = niah_config.get("num_samples", 5)
+
+        results["niah"] = run_niah_evaluation(
+            model=model,
+            tokenizer=tokenizer,
+            context_lengths=context_lengths,
+            depth_percentages=depth_percentages,
+            num_samples=num_samples,
+            seed=seed,
+        )
+
+    if "multi_query_niah" in benchmarks:
+        print("\n" + "=" * 60)
+        print("Running Multi-Query NIAH Evaluation")
+        print("=" * 60)
+
+        mq_config = eval_config.get("multi_query_niah", {})
+        num_kv_pairs = mq_config.get("num_kv_pairs", 6)
+        num_queries = mq_config.get("num_queries", 2)
+        num_samples = mq_config.get("num_samples", 5)
+
+        results["multi_query_niah"] = run_multi_query_evaluation(
+            model=model,
+            tokenizer=tokenizer,
+            context_lengths=context_lengths,
+            num_kv_pairs=num_kv_pairs,
+            num_queries=num_queries,
+            num_samples=num_samples,
+            seed=seed,
+        )
+
+    # Save results
+    results_path = Path(config_manager.output_dir) / "eval_results.json"
+    try:
+        import json
+        with open(results_path, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+        print(f"\nResults saved to: {results_path}")
+    except Exception as e:
+        print(f"Warning: Could not save results: {e}")
+
+    return results
 
 
 def main():

@@ -28,11 +28,40 @@ colab:
 eval:
   # Benchmarks to run
   benchmarks:
-    - "ruler"
     - "niah"
-  # Context lengths to test
+    - "multi_query_niah"
+
+  # Context lengths to test (in tokens)
   context_lengths:
     - 4096
     - 8192
     - 16384
     - 32768
+
+  # Single-NIAH specific settings
+  niah:
+    # Depth percentages (0.0 = start, 1.0 = end)
+    depth_percentages:
+      - 0.0
+      - 0.25
+      - 0.5
+      - 0.75
+      - 1.0
+    # Number of samples per (context_length, depth) combination
+    num_samples: 5
+    # Max new tokens for generation
+    max_new_tokens: 32
+
+  # Multi-Query NIAH specific settings
+  multi_query_niah:
+    # Number of key-value pairs to insert
+    num_kv_pairs: 6
+    # Number of queries to ask
+    num_queries: 2
+    # Number of samples per context length
+    num_samples: 5
+    # Max new tokens for generation
+    max_new_tokens: 64
+
+  # Random seed for reproducibility
+  seed: 42
