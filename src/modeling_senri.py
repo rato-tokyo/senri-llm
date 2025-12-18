@@ -4,7 +4,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, GenerationConfig
 from transformers.generation.utils import GenerationMixin
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
@@ -218,6 +218,13 @@ class SenriForCausalLM(SenriPreTrainedModel):
         self.model = SenriModel(config)
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
+        # Initialize generation config for text generation
+        self.generation_config = GenerationConfig(
+            bos_token_id=config.bos_token_id,
+            eos_token_id=config.eos_token_id,
+            pad_token_id=config.pad_token_id,
+        )
 
         self.post_init()
 
