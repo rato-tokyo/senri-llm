@@ -231,7 +231,12 @@ def train_experiment():
     # Load and prepare data
     print("\n[Step 2] Loading training data...")
     dataset = load_training_dataset(
-        training_config.dataset_name, training_config.dataset_config
+        dataset_name=config_manager.dataset_name,
+        dataset_config=config_manager.dataset_config,
+        niah_ratio=config_manager.niah_ratio,
+        max_train_samples=config_manager.max_train_samples,
+        max_val_samples=config_manager.max_val_samples,
+        seed=config_manager.seed,
     )
     tokenized_dataset = trainer.setup_data(dataset)
 

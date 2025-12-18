@@ -1,7 +1,7 @@
 """Configuration loader for Senri-LLM."""
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import yaml  # type: ignore[import-untyped]
 
@@ -133,14 +133,29 @@ class ConfigManager:
         return self._training["dataset"]["name"]
 
     @property
-    def dataset_config(self) -> str:
+    def dataset_config(self) -> Optional[str]:
         """Get dataset config name."""
-        return self._training["dataset"]["config"]
+        return self._training["dataset"].get("config")
 
     @property
     def max_length(self) -> int:
         """Get max sequence length."""
         return self._training["dataset"]["max_length"]
+
+    @property
+    def niah_ratio(self) -> float:
+        """Get NIAH task injection ratio."""
+        return self._training["dataset"].get("niah_ratio", 0.0)
+
+    @property
+    def max_train_samples(self) -> Optional[int]:
+        """Get max training samples."""
+        return self._training["dataset"].get("max_train_samples")
+
+    @property
+    def max_val_samples(self) -> Optional[int]:
+        """Get max validation samples."""
+        return self._training["dataset"].get("max_val_samples")
 
     @property
     def num_epochs(self) -> int:
