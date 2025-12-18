@@ -148,10 +148,7 @@ def convert_to_senri(
         max_position_embeddings=base_config.max_position_embeddings,
         rms_norm_eps=getattr(base_config, "rms_norm_eps", 1e-6),
         rope_theta=getattr(base_config, "rope_theta", 10000.0),
-        # Senri specific
-        sliding_window_size=min(2048, base_config.max_position_embeddings),
-        chunk_size=64,
-        top_k_memories=min(64, base_config.hidden_size),
+        # Senri specific (simplified: memory-only layers)
         num_memory_layers=num_memory_layers,
         first_memory_layer=first_memory_layer,
         memory_layer_interval=memory_layer_interval,

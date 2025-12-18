@@ -58,6 +58,10 @@ class SenriTrainer:
 
         model_path = Path(self.config.output_dir) / "senri-model"
 
+        # Handle fresh start - clear everything first
+        if self.config.fresh_start:
+            self._clear_checkpoints()
+
         if model_path.exists() and (model_path / "config.json").exists():
             print(f"Loading existing model from {model_path}")
             self.model = SenriForCausalLM.from_pretrained(model_path)
@@ -142,11 +146,12 @@ class SenriTrainer:
         return str(latest)
 
     def _clear_checkpoints(self):
-        """Clear all checkpoints and trained model for fresh start."""
+        """Clear all checkpoints and models for fresh start."""
         import shutil
 
         training_dir = Path(self.config.output_dir) / "training"
         trained_dir = Path(self.config.output_dir) / "senri-trained"
+        model_dir = Path(self.config.output_dir) / "senri-model"
 
         if training_dir.exists():
             print(f"  Clearing checkpoints: {training_dir}")
@@ -155,6 +160,10 @@ class SenriTrainer:
         if trained_dir.exists():
             print(f"  Clearing trained model: {trained_dir}")
             shutil.rmtree(trained_dir)
+
+        if model_dir.exists():
+            print(f"  Clearing converted model: {model_dir}")
+            shutil.rmtree(model_dir)
 
     def train(self, tokenized_dataset) -> Trainer:
         """
@@ -206,10 +215,8 @@ class SenriTrainer:
             callbacks=callbacks if callbacks else None,
         )
 
-        # Handle fresh start
+        # Handle fresh start (models already cleared in setup_model)
         if self.config.fresh_start:
-            print("\n  Fresh start enabled - clearing existing checkpoints...")
-            self._clear_checkpoints()
             resume_checkpoint = None
         else:
             # Check for existing checkpoint to resume from
