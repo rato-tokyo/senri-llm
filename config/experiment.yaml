@@ -32,11 +32,11 @@ eval:
     - "multi_query_niah"
 
   # Context lengths to test (in tokens)
+  # Note: Should not exceed training max_length (2048) unless model supports extrapolation
   context_lengths:
-    - 4096
-    - 8192
-    - 16384
-    - 32768
+    - 1024
+    - 1536
+    - 2048
 
   # Single-NIAH specific settings
   niah:
