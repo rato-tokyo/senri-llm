@@ -9,7 +9,7 @@ from transformers import (
     AutoTokenizer,
     Trainer,
     DataCollatorForLanguageModeling,
-    PreTrainedTokenizer,
+    PreTrainedTokenizerBase,
 )
 
 from ..modeling_senri import SenriForCausalLM
@@ -30,7 +30,7 @@ class SenriTrainer:
         self,
         config: TrainingConfig,
         model: Optional[SenriForCausalLM] = None,
-        tokenizer: Optional[PreTrainedTokenizer] = None,
+        tokenizer: Optional[PreTrainedTokenizerBase] = None,
     ):
         """
         Initialize SenriTrainer.
@@ -71,7 +71,7 @@ class SenriTrainer:
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
 
-        self.model = self.model.to(self.device)
+        self.model = self.model.to(self.device)  # type: ignore[arg-type]
 
         # Set padding token if not set
         if self.tokenizer.pad_token is None:
@@ -143,6 +143,9 @@ class SenriTrainer:
         training_args = self.config.to_training_arguments()
 
         # Data collator
+        if self.tokenizer is None:
+            raise ValueError("Tokenizer not initialized. Call setup_model() first.")
+
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=self.tokenizer,
             mlm=False,
@@ -168,7 +171,8 @@ class SenriTrainer:
         # Save final model
         final_model_path = Path(self.config.output_dir) / "senri-trained"
         trainer.save_model(str(final_model_path))
-        self.tokenizer.save_pretrained(str(final_model_path))
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(str(final_model_path))
 
         # Save metrics
         metrics = train_result.metrics
