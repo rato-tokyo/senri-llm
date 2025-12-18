@@ -277,26 +277,18 @@ class OrthogonalBasisMemory(nn.Module):
             # Get memory indices for this k position
             mem_indices = top_k_indices[..., k_idx]  # [batch, heads, seq]
 
-            # Gather the appropriate memories
+            # Gather the appropriate memories using advanced indexing
             # M: [batch, heads, hidden_size, head_dim, head_dim]
-            # We need to gather along hidden_size dimension
+            # z: [batch, heads, hidden_size, head_dim]
 
-            # Expand indices for gathering
-            idx_expanded = mem_indices.unsqueeze(-1).unsqueeze(-1).expand(
-                batch_size, num_heads, seq_len, head_dim, head_dim
-            )
-            M_selected = torch.gather(
-                self.M.unsqueeze(2).expand(-1, -1, seq_len, -1, -1, -1),
-                dim=3,
-                index=idx_expanded
-            )  # [batch, heads, seq, head_dim, head_dim]
+            # Create batch and head indices
+            batch_idx = torch.arange(batch_size, device=queries.device)[:, None, None]
+            head_idx = torch.arange(num_heads, device=queries.device)[None, :, None]
 
-            idx_z = mem_indices.unsqueeze(-1).expand(batch_size, num_heads, seq_len, head_dim)
-            z_selected = torch.gather(
-                self.z.unsqueeze(2).expand(-1, -1, seq_len, -1, -1),
-                dim=3,
-                index=idx_z
-            )  # [batch, heads, seq, head_dim]
+            # Use advanced indexing to gather
+            # mem_indices: [batch, heads, seq]
+            M_selected = self.M[batch_idx, head_idx, mem_indices]  # [batch, heads, seq, head_dim, head_dim]
+            z_selected = self.z[batch_idx, head_idx, mem_indices]  # [batch, heads, seq, head_dim]
 
             # Compute retrieval for this memory
             # M @ q
