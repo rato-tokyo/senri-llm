@@ -315,6 +315,67 @@ self.z = self.z.detach() + delta_z
 - new-llmプロジェクト（完全detach）でも動作している
 - senri-llmはサンプル内勾配を維持しており、new-llmより学習効率が良い可能性
 
+## new-llmプロジェクトとの比較 - 参考情報
+
+同じディレクトリに存在する`new-llm`プロジェクトも同様のInfini Attention実装を持つ。
+2024-12-19のNaN問題解決時に比較分析を行い、複数の修正に反映した。
+
+### new-llmの概要
+
+**場所**: `/Users/sakajiritomoyoshi/Desktop/git/new-llm`
+
+**主要ファイル**:
+- `src/models/memory/base.py` - CompressiveMemory（メモリ実装）
+- `src/models/layers/senri.py` - SenriAttention（アテンション層）
+- `src/models/memory_utils.py` - ELU+1等のユーティリティ
+
+### senri-llmとnew-llmの主要な違い
+
+| 項目 | senri-llm | new-llm | 備考 |
+|------|-----------|---------|------|
+| **メモリ形状** | `[batch, heads, d, d]` | `[d, d]`（バッチ共有） | senri-llmはバッチ独立 |
+| **メモリ勾配** | `M.detach() + delta_M` | 完全detach | senri-llmはサンプル内勾配維持 |
+| **正規化スケール** | なし | `/ (batch * seq)` | new-llmは値を正規化 |
+| **Delta Rule** | 未実装 | 実装済み（オプション） | 性能向上オプション |
+| **複数メモリ** | 単一メモリ | 複数メモリ対応 | new-llmは発展的機能あり |
+| **freeze/unfreeze** | なし | 実装済み | 知識保存機能 |
+
+### new-llmから学んだ修正点（2024-12-19適用）
+
+1. **`clamp(min=eps)`の使用**
+   - 元: `denominator + eps`
+   - 修正後: `denominator.clamp(min=eps)`
+   - 理由: 負の値に対してもロバスト
+
+2. **`retrieve → update`順序**
+   - 元: `update → retrieve`
+   - 修正後: `retrieve → update`
+   - 理由: 論文準拠の因果性維持、new-llmも同順序
+
+3. **空メモリチェック**
+   - 追加: `if z.abs().sum() < eps: return zeros`
+   - 理由: new-llmの安全機構を採用
+
+### なぜnew-llmでメモリ勾配なしでも動作するか
+
+**メモリ以外の学習可能パラメータ**:
+1. **QKV投影** (`nn.Linear`): 入力→メモリの変換を学習
+2. **メモリゲート**: メモリの使用度合いを学習
+3. **出力投影**: 最終出力の調整を学習
+
+これらのパラメータが学習されるため、メモリ自体に勾配が流れなくても：
+- 「どのようなK,Vをメモリに格納するか」は学習される
+- 「メモリ出力をどう使うか」は学習される
+
+**senri-llmの優位性**: サンプル内勾配を維持することで、メモリの使い方も直接学習できる可能性がある。
+
+### 注意事項
+
+- new-llmが「正しい実装」とは限らない
+- 両プロジェクトは独自の設計判断を持つ
+- 論文のBPTT仕様はどちらも完全には実装していない
+- 比較は参考情報として、独自の検証が必要
+
 ## Training vs Inference Mode（現在: シンプル化版）
 
 **現在のシンプル化版では、学習・推論で同じメモリを使用。**

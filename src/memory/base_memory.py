@@ -170,7 +170,9 @@ class TensorMemory(nn.Module):
         # -> [batch, heads, seq]
         # Use clamp instead of + eps to handle edge cases robustly
         denominator = torch.einsum("bhd,bhsd->bhs", self.z, sigma_queries)
-        denominator = denominator.clamp(min=self.eps).unsqueeze(-1)  # [batch, heads, seq, 1]
+        denominator = denominator.clamp(min=self.eps).unsqueeze(
+            -1
+        )  # [batch, heads, seq, 1]
 
         return numerator / denominator
 
