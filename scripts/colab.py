@@ -6,16 +6,21 @@ Google Colabで実行するための統合スクリプト。
 
 Usage:
     # 学習
-    python scripts/colab.py --experiment train --epochs 3
+    python scripts/colab.py train
 
     # 評価
-    python scripts/colab.py --experiment eval --checkpoint path/to/checkpoint
+    python scripts/colab.py eval
 
     # 動作確認
-    python scripts/colab.py --experiment test
+    python scripts/colab.py test
+
+Configuration:
+    All settings are managed via config/*.yaml files.
+    - config/model.yaml: Model architecture settings
+    - config/training.yaml: Training hyperparameters
+    - config/experiment.yaml: Experiment settings
 """
 
-import argparse
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -25,8 +30,8 @@ import torch
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.configuration_senri import SenriConfig
-from src.training import SenriTrainer, TrainingConfig
+from src.config import ConfigManager
+from src.training import SenriTrainer
 from src.data import load_training_dataset
 
 
@@ -37,7 +42,7 @@ def get_device():
     return torch.device("cpu")
 
 
-def setup_environment():
+def setup_environment(seed: int = 42):
     """Setup experiment environment."""
     device = get_device()
     if torch.cuda.is_available():
@@ -48,9 +53,9 @@ def setup_environment():
     else:
         print("WARNING: No GPU available, using CPU")
 
-    torch.manual_seed(42)
+    torch.manual_seed(seed)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed(42)
+        torch.cuda.manual_seed(seed)
 
     return device
 
@@ -61,25 +66,13 @@ def test_model():
     print("Testing Senri Model")
     print("=" * 50)
 
-    config = SenriConfig(
-        vocab_size=151936,
-        hidden_size=896,
-        intermediate_size=4864,
-        num_hidden_layers=24,
-        num_attention_heads=14,
-        num_key_value_heads=2,
-        sliding_window_size=4096,
-        chunk_size=64,
-        top_k_memories=64,
-        num_memory_layers=3,
-        first_memory_layer=12,
-        memory_layer_interval=4,
-    )
+    config_manager = ConfigManager()
+    config = config_manager.to_senri_config()
 
     print(f"Config created: {config.model_type}")
     print(f"Memory layers: {config.get_memory_layer_indices()}")
 
-    for i in range(24):
+    for i in range(config.num_hidden_layers):
         if config.is_memory_layer(i):
             print(f"  Layer {i}: Has Senri Memory")
 
@@ -89,20 +82,20 @@ def test_model():
     from src.attention.senri_attention import SenriAttention
 
     attention = SenriAttention(
-        hidden_size=896,
-        num_attention_heads=14,
-        num_key_value_heads=2,
-        head_dim=64,
-        sliding_window_size=4096,
-        chunk_size=64,
-        top_k_memories=64,
+        hidden_size=config.hidden_size,
+        num_attention_heads=config.num_attention_heads,
+        num_key_value_heads=config.num_key_value_heads,
+        head_dim=config.hidden_size // config.num_attention_heads,
+        sliding_window_size=config.sliding_window_size,
+        chunk_size=config.chunk_size,
+        top_k_memories=config.top_k_memories,
     )
     attention = attention.to(device)
 
     print("Testing forward pass...")
     batch_size = 2
     seq_len = 128
-    hidden_states = torch.randn(batch_size, seq_len, 896, device=device)
+    hidden_states = torch.randn(batch_size, seq_len, config.hidden_size, device=device)
 
     attention.train()
     output_train, _, _ = attention(hidden_states)
@@ -125,14 +118,17 @@ def test_memory():
 
     from src.memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
 
+    config_manager = ConfigManager()
+    model_config = config_manager.model
+
     device = get_device()
     print(f"\nUsing device: {device}")
 
     batch_size = 2
-    num_heads = 14
+    num_heads = model_config["architecture"]["num_attention_heads"]
     seq_len = 64
-    head_dim = 64
-    hidden_size = 896
+    head_dim = model_config["architecture"]["head_dim"]
+    hidden_size = model_config["architecture"]["hidden_size"]
 
     print("\n1. Testing TensorMemory (training mode)...")
     memory = TensorMemory(num_heads=num_heads, head_dim=head_dim)
@@ -149,11 +145,12 @@ def test_memory():
     print("  TensorMemory test passed!")
 
     print("\n2. Testing OrthogonalBasisMemory (inference mode)...")
+    top_k = model_config["senri"]["top_k_memories"]
     memory_ortho = OrthogonalBasisMemory(
         num_heads=num_heads,
         head_dim=head_dim,
         hidden_size=hidden_size,
-        top_k=64,
+        top_k=top_k,
     )
     memory_ortho.reset(batch_size, device, torch.float32)
 
@@ -168,7 +165,7 @@ def test_memory():
         num_heads=num_heads,
         head_dim=head_dim,
         hidden_size=hidden_size,
-        top_k=64,
+        top_k=top_k,
     )
     senri_memory.train()
     senri_memory.reset(batch_size, device, torch.float32)
@@ -185,50 +182,47 @@ def test_memory():
     print("\nAll memory tests passed!")
 
 
-def convert_experiment(args):
+def convert_experiment():
     """Convert Qwen model to Senri."""
     print("=" * 50)
-    print(f"Loading {args.model_name} and Converting to Senri")
+    print("Converting Qwen to Senri")
     print("=" * 50)
 
     from scripts.convert_qwen_to_senri import convert_qwen_to_senri, verify_conversion
+
+    config_manager = ConfigManager()
+    model_name = config_manager.base_model_name
+    output_dir = config_manager.output_dir
+
+    print(f"Loading {model_name} and Converting to Senri")
 
     device = get_device()
     device_str = "cuda" if device.type == "cuda" else "cpu"
 
     senri_model = convert_qwen_to_senri(
-        model_name=args.model_name,
-        output_dir=args.output_dir,
+        model_name=model_name,
+        output_dir=output_dir,
         device=device_str,
     )
 
-    verify_conversion(senri_model, args.model_name, device_str)
+    verify_conversion(senri_model, model_name, device_str)
     return senri_model
 
 
-def train_experiment(args):
+def train_experiment():
     """Run training experiment using SenriTrainer."""
     print("=" * 50)
     print("Training Experiment")
     print("=" * 50)
 
-    setup_environment()
+    config_manager = ConfigManager()
+    setup_environment(config_manager.seed)
 
-    # Create training config from args
-    config = TrainingConfig(
-        model_name=args.model_name,
-        output_dir=args.output_dir,
-        dataset_name=args.dataset,
-        dataset_config=args.dataset_config,
-        max_length=args.max_length,
-        num_epochs=args.epochs,
-        batch_size=args.batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        learning_rate=args.learning_rate,
-    )
+    # Create training config from config files
+    training_config = config_manager.to_training_config()
 
     # Create trainer
-    trainer = SenriTrainer(config)
+    trainer = SenriTrainer(training_config)
 
     # Setup model
     print("\n[Step 1] Loading/Converting model...")
@@ -236,7 +230,9 @@ def train_experiment(args):
 
     # Load and prepare data
     print("\n[Step 2] Loading training data...")
-    dataset = load_training_dataset(config.dataset_name, config.dataset_config)
+    dataset = load_training_dataset(
+        training_config.dataset_name, training_config.dataset_config
+    )
     tokenized_dataset = trainer.setup_data(dataset)
 
     # Train
@@ -244,15 +240,19 @@ def train_experiment(args):
     hf_trainer = trainer.train(tokenized_dataset)
 
     # Optional: Copy to Google Drive (for Colab)
-    _save_to_drive(config.output_dir)
+    _save_to_drive(training_config.output_dir, config_manager)
 
     return hf_trainer
 
 
-def _save_to_drive(output_dir: str):
+def _save_to_drive(output_dir: str, config_manager: ConfigManager):
     """Save model to Google Drive if available."""
     try:
-        drive_path = Path("/content/drive/MyDrive/senri-checkpoints")
+        colab_config = config_manager.experiment.get("colab", {})
+        if not colab_config.get("auto_save_to_drive", False):
+            return
+
+        drive_path = Path(colab_config.get("drive_checkpoint_path", ""))
         if drive_path.exists():
             import shutil
 
@@ -266,7 +266,7 @@ def _save_to_drive(output_dir: str):
         print(f"  Note: Could not save to Google Drive: {e}")
 
 
-def eval_experiment(args):
+def eval_experiment():
     """Run evaluation experiment."""
     print("=" * 50)
     print("Evaluation Experiment")
@@ -282,91 +282,36 @@ def eval_experiment(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Senri-LLM Colab Experiments")
-    parser.add_argument(
-        "--experiment",
-        type=str,
-        choices=["test", "test_memory", "convert", "train", "eval"],
-        default="test",
-        help="Experiment to run",
-    )
-    parser.add_argument(
-        "--model_name",
-        type=str,
-        default="Qwen/Qwen2.5-0.5B",
-        help="Base model name for conversion",
-    )
-    parser.add_argument(
-        "--checkpoint",
-        type=str,
-        default=None,
-        help="Path to checkpoint for evaluation",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=3,
-        help="Number of training epochs",
-    )
-    parser.add_argument(
-        "--batch_size",
-        type=int,
-        default=2,
-        help="Training batch size (default=2 for memory efficiency)",
-    )
-    parser.add_argument(
-        "--learning_rate",
-        type=float,
-        default=5e-5,
-        help="Learning rate",
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="./outputs",
-        help="Output directory for checkpoints and logs",
-    )
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default="wikitext",
-        help="Dataset name for training",
-    )
-    parser.add_argument(
-        "--dataset_config",
-        type=str,
-        default="wikitext-2-raw-v1",
-        help="Dataset configuration name",
-    )
-    parser.add_argument(
-        "--max_length",
-        type=int,
-        default=512,
-        help="Maximum sequence length for training",
-    )
-    parser.add_argument(
-        "--gradient_accumulation_steps",
-        type=int,
-        default=4,
-        help="Gradient accumulation steps",
-    )
+    """Main entry point."""
+    import sys
 
-    args = parser.parse_args()
+    # Simple command-line interface without argparse
+    # All configuration is managed via config/*.yaml files
+    if len(sys.argv) < 2:
+        experiment = "test"
+    else:
+        experiment = sys.argv[1]
 
-    print(f"Running experiment: {args.experiment}")
+    valid_experiments = ["test", "test_memory", "convert", "train", "eval"]
+    if experiment not in valid_experiments:
+        print(f"Unknown experiment: {experiment}")
+        print(f"Valid experiments: {valid_experiments}")
+        sys.exit(1)
+
+    print(f"Running experiment: {experiment}")
     print(f"Timestamp: {datetime.now().isoformat()}")
     print()
 
-    if args.experiment == "test":
+    if experiment == "test":
         test_model()
-    elif args.experiment == "test_memory":
+    elif experiment == "test_memory":
         test_memory()
-    elif args.experiment == "convert":
-        convert_experiment(args)
-    elif args.experiment == "train":
-        train_experiment(args)
-    elif args.experiment == "eval":
-        eval_experiment(args)
+    elif experiment == "convert":
+        convert_experiment()
+    elif experiment == "train":
+        train_experiment()
+    elif experiment == "eval":
+        eval_experiment()
 
 
 if __name__ == "__main__":

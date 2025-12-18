@@ -1,0 +1,38 @@
+# Senri Experiment Configuration
+# 実験全体の設定
+
+# Output settings
+output:
+  base_dir: "./outputs"
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+
+# Experiment modes
+# Available: test, test_memory, convert, train, eval
+experiment:
+  default_mode: "test"
+
+# Model conversion settings
+conversion:
+  save_converted_model: true
+  verify_after_conversion: true
+
+# Google Colab specific settings
+colab:
+  # Google Drive mount path for checkpoints
+  drive_checkpoint_path: "/content/drive/MyDrive/senri-checkpoints"
+  # Auto-save to drive after training
+  auto_save_to_drive: true
+
+# Evaluation settings
+eval:
+  # Benchmarks to run
+  benchmarks:
+    - "ruler"
+    - "niah"
+  # Context lengths to test
+  context_lengths:
+    - 4096
+    - 8192
+    - 16384
+    - 32768

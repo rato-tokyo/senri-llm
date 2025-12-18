@@ -107,6 +107,71 @@ class SenriAttention(nn.Module):
             return self._forward_inference(...)  # 直交基底ルーティング
 ```
 
+## Configuration Management Policy
+
+### 設定ファイルベースの管理（重要）
+
+**全ての実験パラメータは `config/` ディレクトリのYAMLファイルで管理する。**
+
+スクリプトにコマンドラインオプションを追加することは禁止。設定変更は必ずconfigファイルを編集して行う。
+
+### Config Directory Structure
+
+```
+config/
+├── model.yaml       # モデルアーキテクチャ設定
+├── training.yaml    # 学習ハイパーパラメータ
+└── experiment.yaml  # 実験全体の設定
+```
+
+### 設定ファイルの役割
+
+| ファイル | 内容 |
+|---------|------|
+| `model.yaml` | vocab_size, hidden_size, num_layers, memory layer設定など |
+| `training.yaml` | epochs, batch_size, learning_rate, optimizer設定など |
+| `experiment.yaml` | output_dir, benchmark設定, Colab設定など |
+
+### 使用方法
+
+```python
+from src.config import ConfigManager
+
+# 全設定を読み込み
+config = ConfigManager()
+
+# 個別アクセス
+model_name = config.base_model_name
+batch_size = config.batch_size
+
+# TrainingConfigに変換
+training_config = config.to_training_config()
+
+# SenriConfigに変換
+senri_config = config.to_senri_config()
+```
+
+### スクリプト実行
+
+```bash
+# 引数なしで実行（config/*.yamlから設定を読み込む）
+python scripts/colab.py train
+python scripts/colab.py test
+python scripts/colab.py eval
+```
+
+### 禁止事項
+
+- ⛔ スクリプトへのargparse引数追加
+- ⛔ コード内でのハードコーディング
+- ⛔ 環境変数による設定（特殊な場合を除く）
+
+### 設定変更の手順
+
+1. `config/*.yaml` を編集
+2. 変更をコミット
+3. スクリプトを実行
+
 ## Coding Standards
 
 ### File Naming
@@ -264,8 +329,13 @@ plt.imshow(attention_weights[0, 0].detach().cpu())
 # 2. 依存関係のインストール
 !pip install -e .
 
-# 3. 実験の実行
-!python scripts/colab.py --experiment train --epochs 3
+# 3. 設定の確認・編集（必要に応じて）
+# config/training.yaml を編集して学習パラメータを調整
+
+# 4. 実験の実行
+!python scripts/colab.py train   # 学習
+!python scripts/colab.py test    # 動作確認
+!python scripts/colab.py eval    # 評価
 ```
 
 ### Colab Notebook構成

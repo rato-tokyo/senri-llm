@@ -1,0 +1,39 @@
+# Senri Training Configuration
+# 学習ハイパーパラメータの設定
+
+# Dataset settings
+dataset:
+  name: "wikitext"
+  config: "wikitext-2-raw-v1"
+  max_length: 512
+
+# Training hyperparameters
+training:
+  num_epochs: 3
+  batch_size: 2
+  gradient_accumulation_steps: 4
+  learning_rate: 5.0e-5
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  lr_scheduler_type: "cosine"
+
+  # Differential learning rate for memory layers
+  # Set > 1.0 to train memory layers faster
+  memory_layer_lr_multiplier: 1.0
+
+# Evaluation settings
+evaluation:
+  eval_steps: 100
+  save_steps: 500
+  save_total_limit: 3
+  logging_steps: 10
+
+# Memory optimization
+optimization:
+  gradient_checkpointing: true
+  fp16: true
+
+# Misc
+misc:
+  seed: 42
+  dataloader_num_workers: 2
