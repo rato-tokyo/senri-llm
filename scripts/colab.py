@@ -246,18 +246,179 @@ def train_experiment(args):
     print("Training Experiment")
     print("=" * 50)
 
-    setup_environment()
+    device = setup_environment()
 
-    # TODO: Implement full training pipeline
-    # 1. Load Qwen2.5-0.5B
-    # 2. Convert to Senri model
-    # 3. Load training data
-    # 4. Setup trainer
-    # 5. Train
-    # 6. Save checkpoints
+    # Import required modules
+    from transformers import (
+        AutoTokenizer,
+        TrainingArguments,
+        Trainer,
+        DataCollatorForLanguageModeling,
+    )
+    from datasets import load_dataset
 
-    print("Training experiment not yet implemented")
-    print("Please complete modeling_senri.py first")
+    from src.modeling_senri import SenriForCausalLM
+    from src.configuration_senri import SenriConfig
+
+    # Step 1: Load or convert model
+    print("\n[Step 1] Loading/Converting model...")
+    model_path = Path(args.output_dir) / "senri-model"
+
+    if model_path.exists() and (model_path / "config.json").exists():
+        print(f"Loading existing model from {model_path}")
+        model = SenriForCausalLM.from_pretrained(model_path)
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+    else:
+        print(f"Converting from {args.model_name}")
+        from convert_qwen_to_senri import convert_qwen_to_senri
+
+        device_str = "cuda" if device.type == "cuda" else "cpu"
+        model = convert_qwen_to_senri(
+            model_name=args.model_name,
+            output_dir=str(model_path),
+            device=device_str,
+        )
+        tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+
+    model = model.to(device)
+    print(f"Model loaded on {device}")
+    clear_memory()
+
+    # Step 2: Load training data
+    print("\n[Step 2] Loading training data...")
+
+    # Use a small subset of a standard dataset for training
+    # Default: wikitext-2-raw-v1 (small, good for testing)
+    dataset_name = args.dataset
+    dataset_config = args.dataset_config
+
+    try:
+        dataset = load_dataset(dataset_name, dataset_config)
+        print(f"Loaded dataset: {dataset_name}/{dataset_config}")
+    except Exception as e:
+        print(f"Failed to load {dataset_name}: {e}")
+        print("Falling back to wikitext-2-raw-v1")
+        dataset = load_dataset("wikitext", "wikitext-2-raw-v1")
+
+    # Tokenize dataset
+    print("Tokenizing dataset...")
+
+    # Set padding token if not set
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    max_length = args.max_length
+
+    def tokenize_function(examples):
+        return tokenizer(
+            examples["text"],
+            truncation=True,
+            max_length=max_length,
+            padding="max_length",
+            return_special_tokens_mask=True,
+        )
+
+    tokenized_dataset = dataset.map(
+        tokenize_function,
+        batched=True,
+        remove_columns=dataset["train"].column_names,
+        num_proc=4,
+    )
+
+    # Filter out empty examples
+    tokenized_dataset = tokenized_dataset.filter(
+        lambda x: len(x["input_ids"]) > 0 and sum(x["attention_mask"]) > 10
+    )
+
+    print(f"Training samples: {len(tokenized_dataset['train'])}")
+    print(f"Validation samples: {len(tokenized_dataset['validation'])}")
+    clear_memory()
+
+    # Step 3: Setup training arguments
+    print("\n[Step 3] Setting up trainer...")
+
+    training_output_dir = Path(args.output_dir) / "training"
+    training_output_dir.mkdir(parents=True, exist_ok=True)
+
+    training_args = TrainingArguments(
+        output_dir=str(training_output_dir),
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        weight_decay=0.01,
+        warmup_ratio=0.1,
+        lr_scheduler_type="cosine",
+        logging_steps=10,
+        eval_strategy="steps",
+        eval_steps=100,
+        save_strategy="steps",
+        save_steps=500,
+        save_total_limit=3,
+        load_best_model_at_end=True,
+        metric_for_best_model="eval_loss",
+        greater_is_better=False,
+        fp16=torch.cuda.is_available(),
+        dataloader_num_workers=2,
+        report_to="none",  # Disable wandb/tensorboard for simplicity
+        seed=42,
+    )
+
+    # Data collator for causal LM
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,  # Causal LM, not masked LM
+    )
+
+    # Create trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=tokenized_dataset["train"],
+        eval_dataset=tokenized_dataset["validation"],
+        data_collator=data_collator,
+    )
+
+    # Step 4: Train
+    print("\n[Step 4] Starting training...")
+    print(f"  Epochs: {args.epochs}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Learning rate: {args.learning_rate}")
+    print(f"  Output dir: {training_output_dir}")
+
+    train_result = trainer.train()
+
+    # Step 5: Save final model
+    print("\n[Step 5] Saving final model...")
+    final_model_path = Path(args.output_dir) / "senri-trained"
+    trainer.save_model(str(final_model_path))
+    tokenizer.save_pretrained(str(final_model_path))
+
+    # Save training metrics
+    metrics = train_result.metrics
+    trainer.log_metrics("train", metrics)
+    trainer.save_metrics("train", metrics)
+    trainer.save_state()
+
+    print(f"\nTraining complete!")
+    print(f"  Final loss: {metrics.get('train_loss', 'N/A')}")
+    print(f"  Model saved to: {final_model_path}")
+
+    # Step 6: Optional - Copy to Google Drive (for Colab)
+    try:
+        drive_path = Path("/content/drive/MyDrive/senri-checkpoints")
+        if drive_path.exists():
+            import shutil
+
+            drive_save_path = drive_path / f"senri-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            shutil.copytree(final_model_path, drive_save_path)
+            print(f"  Also saved to Google Drive: {drive_save_path}")
+    except Exception as e:
+        print(f"  Note: Could not save to Google Drive: {e}")
+
+    clear_memory()
+    return trainer
 
 
 def eval_experiment(args):
@@ -319,6 +480,30 @@ def main():
         type=str,
         default="./outputs",
         help="Output directory for checkpoints and logs",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="wikitext",
+        help="Dataset name for training",
+    )
+    parser.add_argument(
+        "--dataset_config",
+        type=str,
+        default="wikitext-2-raw-v1",
+        help="Dataset configuration name",
+    )
+    parser.add_argument(
+        "--max_length",
+        type=int,
+        default=512,
+        help="Maximum sequence length for training",
+    )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=4,
+        help="Gradient accumulation steps",
     )
 
     args = parser.parse_args()
