@@ -255,14 +255,11 @@ class SenriAttention(nn.Module):
         ).transpose(1, 2)
         # [batch, heads, seq, head_dim]
 
-        # Reset memory for each forward pass during training
-        # During training, each sample is an independent sequence, so we reset memory
-        # to prevent gradients from flowing across different training samples.
-        # During inference, memory accumulates across chunks (controlled externally via reset_memory)
-        if self.training:
-            self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
-        elif self.memory.training_memory.M is None:
-            self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
+        # Reset memory for each forward pass
+        # During training: each sample is independent, reset to prevent gradient issues
+        # During eval: also reset for each sample (short context evaluation)
+        # For long-context inference, call reset_memory() externally before generation
+        self.memory.reset(batch_size, hidden_states.device, hidden_states.dtype)
 
         # ========== Local Attention (SWA with RoPE) ==========
         # Apply RoPE to Q, K for local attention
