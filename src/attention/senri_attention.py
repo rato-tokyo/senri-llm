@@ -86,7 +86,9 @@ class SenriAttention(nn.Module):
             batch, seq_len, num_kv_heads, n_rep, self.head_dim
         )
         # Reshape to [batch, seq, num_kv_heads * n_rep * head_dim]
-        return hidden_states.reshape(batch, seq_len, num_kv_heads * n_rep * self.head_dim)
+        return hidden_states.reshape(
+            batch, seq_len, num_kv_heads * n_rep * self.head_dim
+        )
 
     def forward(
         self,
