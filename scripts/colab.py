@@ -339,6 +339,9 @@ def train_experiment(args):
     training_output_dir = Path(args.output_dir) / "training"
     training_output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Enable gradient checkpointing to save memory
+    model.gradient_checkpointing_enable()
+
     training_args = TrainingArguments(
         output_dir=str(training_output_dir),
         num_train_epochs=args.epochs,
@@ -362,6 +365,8 @@ def train_experiment(args):
         dataloader_num_workers=2,
         report_to="none",  # Disable wandb/tensorboard for simplicity
         seed=42,
+        # Memory optimization
+        gradient_checkpointing=True,
     )
 
     # Data collator for causal LM
@@ -467,8 +472,8 @@ def main():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
-        help="Training batch size",
+        default=2,
+        help="Training batch size (default=2 for memory efficiency)",
     )
     parser.add_argument(
         "--learning_rate",

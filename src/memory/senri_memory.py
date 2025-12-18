@@ -41,9 +41,13 @@ class SenriMemory(nn.Module):
         )
 
     def reset(self, batch_size: int, device: torch.device, dtype: torch.dtype):
-        """Reset both memory states."""
-        self.training_memory.reset(batch_size, device, dtype)
-        self.inference_memory.reset(batch_size, device, dtype)
+        """Reset appropriate memory based on training mode."""
+        if self.training:
+            # Only reset training memory during training to save GPU memory
+            self.training_memory.reset(batch_size, device, dtype)
+        else:
+            # Reset inference memory during inference
+            self.inference_memory.reset(batch_size, device, dtype)
 
     def update(self, keys: torch.Tensor, values: torch.Tensor):
         """Update appropriate memory based on training mode."""
