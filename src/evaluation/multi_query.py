@@ -15,7 +15,7 @@ Based on HSA-UltraLong methodology: 2 queries, 6 key-value pairs.
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from transformers import PreTrainedTokenizerBase
@@ -60,8 +60,18 @@ KEY_TYPES = [
 
 # Names for key-value pairs
 NAMES = [
-    "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta",
-    "Eta", "Theta", "Iota", "Kappa", "Lambda", "Mu",
+    "Alpha",
+    "Beta",
+    "Gamma",
+    "Delta",
+    "Epsilon",
+    "Zeta",
+    "Eta",
+    "Theta",
+    "Iota",
+    "Kappa",
+    "Lambda",
+    "Mu",
 ]
 
 # Question templates
@@ -126,12 +136,14 @@ class MultiQueryNIAHEvaluator:
             value = self._generate_value()
             needle = template.format(name=name, value=value)
 
-            pairs.append({
-                "name": name,
-                "key_type": key_type,
-                "value": value,
-                "needle": needle,
-            })
+            pairs.append(
+                {
+                    "name": name,
+                    "key_type": key_type,
+                    "value": value,
+                    "needle": needle,
+                }
+            )
 
         return pairs
 
@@ -146,9 +158,7 @@ class MultiQueryNIAHEvaluator:
 
         return haystack[:target_chars]
 
-    def _insert_needles(
-        self, haystack: str, kv_pairs: List[Dict[str, str]]
-    ) -> str:
+    def _insert_needles(self, haystack: str, kv_pairs: List[Dict[str, str]]) -> str:
         """
         Insert needles at random positions throughout the haystack.
 
@@ -167,10 +177,11 @@ class MultiQueryNIAHEvaluator:
             return haystack + " " + needles
 
         # Generate random positions (sorted for sequential insertion)
-        positions = sorted(random.sample(
-            range(1, len(sentences) - 1),
-            min(len(kv_pairs), len(sentences) - 2)
-        ))
+        positions = sorted(
+            random.sample(
+                range(1, len(sentences) - 1), min(len(kv_pairs), len(sentences) - 2)
+            )
+        )
 
         # Insert needles at positions (adjust for previous insertions)
         for i, (pos, pair) in enumerate(zip(positions, kv_pairs)):
@@ -263,7 +274,7 @@ class MultiQueryNIAHEvaluator:
 
             # Decode response
             response = self.tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1]:],
+                outputs[0][inputs["input_ids"].shape[1] :],
                 skip_special_tokens=True,
             )
 
@@ -278,7 +289,9 @@ class MultiQueryNIAHEvaluator:
             if sample_correct == len(query_pairs):
                 perfect_samples += 1
 
-        query_accuracy = correct_queries / total_queries * 100 if total_queries > 0 else 0
+        query_accuracy = (
+            correct_queries / total_queries * 100 if total_queries > 0 else 0
+        )
         sample_accuracy = perfect_samples / self.config.num_samples * 100
 
         return {
@@ -291,14 +304,14 @@ class MultiQueryNIAHEvaluator:
             "total_samples": self.config.num_samples,
         }
 
-    def evaluate(self) -> Dict[str, any]:
+    def evaluate(self) -> Dict[str, Any]:
         """
         Run full Multi-Query NIAH evaluation.
 
         Returns:
             Results dictionary.
         """
-        results = {
+        results: Dict[str, Any] = {
             "config": {
                 "context_lengths": self.config.context_lengths,
                 "num_kv_pairs": self.config.num_kv_pairs,
@@ -311,8 +324,10 @@ class MultiQueryNIAHEvaluator:
 
         print("=" * 60)
         print("Multi-Query Needle-in-a-Haystack Evaluation")
-        print(f"  {self.config.num_queries} queries, "
-              f"{self.config.num_kv_pairs} key-value pairs")
+        print(
+            f"  {self.config.num_queries} queries, "
+            f"{self.config.num_kv_pairs} key-value pairs"
+        )
         print("=" * 60)
 
         for ctx_len in self.config.context_lengths:
@@ -320,10 +335,14 @@ class MultiQueryNIAHEvaluator:
             results["results"].append(result)
 
             print(f"\nContext Length: {ctx_len:,} tokens")
-            print(f"  Query Accuracy:  {result['query_accuracy']:5.1f}% "
-                  f"({result['correct_queries']}/{result['total_queries']})")
-            print(f"  Sample Accuracy: {result['sample_accuracy']:5.1f}% "
-                  f"({result['perfect_samples']}/{result['total_samples']} perfect)")
+            print(
+                f"  Query Accuracy:  {result['query_accuracy']:5.1f}% "
+                f"({result['correct_queries']}/{result['total_queries']})"
+            )
+            print(
+                f"  Sample Accuracy: {result['sample_accuracy']:5.1f}% "
+                f"({result['perfect_samples']}/{result['total_samples']} perfect)"
+            )
 
         # Summary
         results["summary"]["avg_query_accuracy"] = sum(
@@ -336,8 +355,12 @@ class MultiQueryNIAHEvaluator:
         print("\n" + "=" * 60)
         print("Summary")
         print("=" * 60)
-        print(f"Average Query Accuracy:  {results['summary']['avg_query_accuracy']:.1f}%")
-        print(f"Average Sample Accuracy: {results['summary']['avg_sample_accuracy']:.1f}%")
+        print(
+            f"Average Query Accuracy:  {results['summary']['avg_query_accuracy']:.1f}%"
+        )
+        print(
+            f"Average Sample Accuracy: {results['summary']['avg_sample_accuracy']:.1f}%"
+        )
 
         return results
 
@@ -350,7 +373,7 @@ def run_multi_query_evaluation(
     num_queries: int = 2,
     num_samples: int = 5,
     seed: int = 42,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Convenience function to run Multi-Query NIAH evaluation.
 

@@ -362,6 +362,7 @@ def eval_experiment(model_path: str = None):
     results_path = Path(config_manager.output_dir) / "eval_results.json"
     try:
         import json
+
         with open(results_path, "w") as f:
             json.dump(results, f, indent=2, default=str)
         print(f"\nResults saved to: {results_path}")

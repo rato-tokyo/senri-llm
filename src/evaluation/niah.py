@@ -12,7 +12,7 @@ Based on HSA-UltraLong paper methodology:
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from transformers import PreTrainedTokenizerBase
@@ -114,9 +114,7 @@ class NIAHEvaluator:
 
         return haystack[:target_chars]
 
-    def _insert_needle(
-        self, haystack: str, needle: str, depth_percent: float
-    ) -> str:
+    def _insert_needle(self, haystack: str, needle: str, depth_percent: float) -> str:
         """
         Insert needle at specified depth in haystack.
 
@@ -216,7 +214,7 @@ class NIAHEvaluator:
 
             # Decode response
             response = self.tokenizer.decode(
-                outputs[0][inputs["input_ids"].shape[1]:],
+                outputs[0][inputs["input_ids"].shape[1] :],
                 skip_special_tokens=True,
             )
 
@@ -233,14 +231,14 @@ class NIAHEvaluator:
             "total": total,
         }
 
-    def evaluate(self) -> Dict[str, any]:
+    def evaluate(self) -> Dict[str, Any]:
         """
         Run full NIAH evaluation across all context lengths and depths.
 
         Returns:
             Results dictionary with all metrics.
         """
-        results = {
+        results: Dict[str, Any] = {
             "config": {
                 "context_lengths": self.config.context_lengths,
                 "depth_percentages": self.config.depth_percentages,
@@ -262,14 +260,14 @@ class NIAHEvaluator:
                 result = self._evaluate_single(ctx_len, depth)
                 results["results"].append(result)
                 print(
-                    f"  Depth {depth*100:5.1f}%: "
+                    f"  Depth {depth * 100:5.1f}%: "
                     f"{result['accuracy']:5.1f}% "
                     f"({result['correct']}/{result['total']})"
                 )
 
         # Calculate summary statistics
-        by_context = {}
-        by_depth = {}
+        by_context: Dict[int, List[float]] = {}
+        by_depth: Dict[float, List[float]] = {}
 
         for r in results["results"]:
             ctx = r["context_length"]
@@ -303,7 +301,7 @@ class NIAHEvaluator:
             print(f"  {ctx:>6,} tokens: {acc:5.1f}%")
         print("\nBy Depth:")
         for depth, acc in results["summary"]["by_depth"].items():
-            print(f"  {depth*100:5.1f}%: {acc:5.1f}%")
+            print(f"  {depth * 100:5.1f}%: {acc:5.1f}%")
 
         return results
 
@@ -315,7 +313,7 @@ def run_niah_evaluation(
     depth_percentages: Optional[List[float]] = None,
     num_samples: int = 5,
     seed: int = 42,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Convenience function to run NIAH evaluation.
 
