@@ -1,7 +1,7 @@
 """Unified Senri memory interface switching between training and inference modes."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -180,7 +180,7 @@ class SenriMemory(nn.Module):
             except RuntimeError:
                 # SVD failed (e.g., memory too large)
                 effective_rank = 0.0
-                max_rank = min(d1, d2) if 'd1' in dir() else 0
+                max_rank = min(d1, d2) if "d1" in dir() else 0
                 rank_ratio = 0.0
 
             # Determine if cleaning is needed

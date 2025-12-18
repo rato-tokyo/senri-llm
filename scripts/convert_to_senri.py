@@ -113,9 +113,11 @@ def convert_to_senri(
     base_config = base_model.config
     base_state_dict = base_model.state_dict()
 
-    print(f"Base config: hidden_size={base_config.hidden_size}, "
-          f"num_layers={base_config.num_hidden_layers}, "
-          f"num_heads={base_config.num_attention_heads}")
+    print(
+        f"Base config: hidden_size={base_config.hidden_size}, "
+        f"num_layers={base_config.num_hidden_layers}, "
+        f"num_heads={base_config.num_attention_heads}"
+    )
 
     # Calculate head_dim
     head_dim = base_config.hidden_size // base_config.num_attention_heads
@@ -140,10 +142,12 @@ def convert_to_senri(
         intermediate_size=base_config.intermediate_size,
         num_hidden_layers=base_config.num_hidden_layers,
         num_attention_heads=base_config.num_attention_heads,
-        num_key_value_heads=getattr(base_config, 'num_key_value_heads', base_config.num_attention_heads),
+        num_key_value_heads=getattr(
+            base_config, "num_key_value_heads", base_config.num_attention_heads
+        ),
         max_position_embeddings=base_config.max_position_embeddings,
-        rms_norm_eps=getattr(base_config, 'rms_norm_eps', 1e-6),
-        rope_theta=getattr(base_config, 'rope_theta', 10000.0),
+        rms_norm_eps=getattr(base_config, "rms_norm_eps", 1e-6),
+        rope_theta=getattr(base_config, "rope_theta", 10000.0),
         # Senri specific
         sliding_window_size=min(2048, base_config.max_position_embeddings),
         chunk_size=64,
@@ -176,7 +180,9 @@ def convert_to_senri(
         senri_state_dict["lm_head.weight"] = base_state_dict["lm_head.weight"]
     else:
         # Tied embeddings
-        senri_state_dict["lm_head.weight"] = base_state_dict["model.embed_tokens.weight"]
+        senri_state_dict["lm_head.weight"] = base_state_dict[
+            "model.embed_tokens.weight"
+        ]
 
     # Convert each layer
     for layer_idx in range(base_config.num_hidden_layers):
