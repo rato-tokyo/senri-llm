@@ -7,11 +7,8 @@ class SenriConfig(LlamaConfig):
     """
     Configuration class for Senri model.
 
-    Extends LlamaConfig with Senri-specific parameters for
-    orthogonal basis routed infinite attention.
-
-    Note: SmolLM-135M uses LlamaConfig architecture, making this
-    compatible with both SmolLM and Llama-family models.
+    Extends LlamaConfig with Senri-specific parameters.
+    Simplified version: memory-only layers (no local attention in memory layers).
     """
 
     model_type = "senri"
@@ -19,15 +16,9 @@ class SenriConfig(LlamaConfig):
     def __init__(
         self,
         # Senri Memory parameters
-        sliding_window_size: int = 4096,
-        chunk_size: int = 64,
-        top_k_memories: int = 64,
-        num_memory_layers: int = 3,
-        first_memory_layer: int = 12,
-        memory_layer_interval: int = 4,
-        # Memory gate (for combining local and global attention)
-        use_memory_gate: bool = True,
-        memory_gate_init: float = 0.0,
+        num_memory_layers: int = 2,
+        first_memory_layer: int = 10,
+        memory_layer_interval: int = 10,
         # Normalization
         memory_eps: float = 1e-6,
         **kwargs,
@@ -36,29 +27,17 @@ class SenriConfig(LlamaConfig):
         Initialize SenriConfig.
 
         Args:
-            sliding_window_size: Size of sliding window for local attention.
-            chunk_size: Size of chunks for memory updates.
-            top_k_memories: Number of memories to select during inference.
             num_memory_layers: Number of layers with Senri Memory.
             first_memory_layer: Index of first memory layer.
             memory_layer_interval: Interval between memory layers.
-            use_memory_gate: Whether to use learnable gate for memory fusion.
-            memory_gate_init: Initial value for memory gate (sigmoid input).
             memory_eps: Epsilon for numerical stability in memory retrieval.
         """
         super().__init__(**kwargs)
 
         # Senri Memory parameters
-        self.sliding_window_size = sliding_window_size
-        self.chunk_size = chunk_size
-        self.top_k_memories = top_k_memories
         self.num_memory_layers = num_memory_layers
         self.first_memory_layer = first_memory_layer
         self.memory_layer_interval = memory_layer_interval
-
-        # Memory gate
-        self.use_memory_gate = use_memory_gate
-        self.memory_gate_init = memory_gate_init
 
         # Normalization
         self.memory_eps = memory_eps
@@ -68,7 +47,7 @@ class SenriConfig(LlamaConfig):
         Get list of layer indices that have Senri Memory.
 
         Returns:
-            List of layer indices, e.g., [12, 16, 20] for default config.
+            List of layer indices, e.g., [10, 20] for default config.
         """
         return [
             self.first_memory_layer + i * self.memory_layer_interval

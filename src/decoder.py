@@ -27,18 +27,8 @@ class SenriDecoderLayer(nn.Module):
         if self.has_memory:
             self.self_attn = SenriAttention(
                 hidden_size=config.hidden_size,
-                num_attention_heads=config.num_attention_heads,
-                num_key_value_heads=config.num_key_value_heads,
-                head_dim=config.hidden_size // config.num_attention_heads,
-                sliding_window_size=config.sliding_window_size,
-                chunk_size=config.chunk_size,
-                top_k_memories=config.top_k_memories,
-                use_memory_gate=config.use_memory_gate,
-                memory_gate_init=config.memory_gate_init,
                 eps=config.memory_eps,
                 layer_idx=layer_idx,
-                max_position_embeddings=config.max_position_embeddings,
-                rope_theta=config.rope_theta,
             )
         else:
             self.self_attn = SenriStandardAttention(config, layer_idx)
