@@ -37,8 +37,16 @@ def clear_memory():
     print(f"GPU Memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB")
 
 
+def get_device():
+    """Get the best available device."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
 def setup_environment():
     """Setup experiment environment."""
+    device = get_device()
     # Check GPU
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
@@ -49,7 +57,9 @@ def setup_environment():
     # Set seed for reproducibility
     torch.manual_seed(42)
     if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(42)
+        torch.cuda.manual_seed(42)
+
+    return device
 
 
 def test_model():
@@ -83,8 +93,12 @@ def test_model():
         if config.is_memory_layer(i):
             print(f"  Layer {i}: Has Senri Memory")
 
+    # Get device
+    device = get_device()
+    print(f"\nUsing device: {device}")
+
     # Create model (small version for testing)
-    print("\nCreating model...")
+    print("Creating model...")
     # For testing, we'll just test the attention module
     from src.attention.senri_attention import SenriAttention
 
@@ -97,21 +111,23 @@ def test_model():
         chunk_size=64,
         top_k_memories=64,
     )
+    attention = attention.to(device)
 
     # Test forward pass
     print("Testing forward pass...")
     batch_size = 2
     seq_len = 128
-    hidden_states = torch.randn(batch_size, seq_len, 896)
+    hidden_states = torch.randn(batch_size, seq_len, 896, device=device)
 
     # Training mode
     attention.train()
     output_train, _, _ = attention(hidden_states)
     print(f"  Training mode output shape: {output_train.shape}")
+    print(f"  Output device: {output_train.device}")
 
     # Inference mode
     attention.eval()
-    attention.reset_memory(batch_size, hidden_states.device, hidden_states.dtype)
+    attention.reset_memory(batch_size, device, hidden_states.dtype)
     with torch.no_grad():
         output_eval, _, _ = attention(hidden_states)
     print(f"  Inference mode output shape: {output_eval.shape}")
@@ -126,7 +142,10 @@ def test_memory():
     print("Testing Tensor Memory")
     print("=" * 50)
 
-    from src.memory.tensor_memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
+    from src.memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
+
+    device = get_device()
+    print(f"\nUsing device: {device}")
 
     batch_size = 2
     num_heads = 14
@@ -137,15 +156,16 @@ def test_memory():
     # Test TensorMemory (training)
     print("\n1. Testing TensorMemory (training mode)...")
     memory = TensorMemory(num_heads=num_heads, head_dim=head_dim)
-    memory.reset(batch_size, torch.device('cpu'), torch.float32)
+    memory.reset(batch_size, device, torch.float32)
 
-    k = torch.randn(batch_size, num_heads, seq_len, head_dim)
-    v = torch.randn(batch_size, num_heads, seq_len, head_dim)
-    q = torch.randn(batch_size, num_heads, seq_len, head_dim)
+    k = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+    v = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+    q = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
 
     memory.update(k, v)
     output = memory.retrieve(q)
     print(f"  Output shape: {output.shape}")
+    print(f"  Output device: {output.device}")
     assert output.shape == (batch_size, num_heads, seq_len, head_dim)
     print("  TensorMemory test passed!")
 
@@ -157,11 +177,12 @@ def test_memory():
         hidden_size=hidden_size,
         top_k=64,
     )
-    memory_ortho.reset(batch_size, torch.device('cpu'), torch.float32)
+    memory_ortho.reset(batch_size, device, torch.float32)
 
     memory_ortho.update(k, v)
     output_ortho = memory_ortho.retrieve(q)
     print(f"  Output shape: {output_ortho.shape}")
+    print(f"  Output device: {output_ortho.device}")
     assert output_ortho.shape == (batch_size, num_heads, seq_len, head_dim)
     print("  OrthogonalBasisMemory test passed!")
 
@@ -173,7 +194,7 @@ def test_memory():
         hidden_size=hidden_size,
         top_k=64,
     )
-    senri_memory.reset(batch_size, torch.device('cpu'), torch.float32)
+    senri_memory.reset(batch_size, device, torch.float32)
 
     # Training mode
     senri_memory.train()
@@ -182,13 +203,14 @@ def test_memory():
     print(f"  Training mode output shape: {output_train.shape}")
 
     # Reset and test inference mode
-    senri_memory.reset(batch_size, torch.device('cpu'), torch.float32)
+    senri_memory.reset(batch_size, device, torch.float32)
     senri_memory.eval()
     senri_memory.update(k, v)
     output_eval = senri_memory.retrieve(q)
     print(f"  Inference mode output shape: {output_eval.shape}")
 
     print("\nAll memory tests passed!")
+    clear_memory()
 
 
 def load_qwen_and_convert():

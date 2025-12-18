@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from src.configuration_senri import SenriConfig
-from src.memory.tensor_memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
+from src.memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
 from src.attention.senri_attention import SenriAttention
 
 

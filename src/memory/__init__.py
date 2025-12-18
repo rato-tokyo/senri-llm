@@ -1,3 +1,7 @@
-from .tensor_memory import TensorMemory, OrthogonalBasisMemory
+"""Memory modules for Senri attention."""
 
-__all__ = ["TensorMemory", "OrthogonalBasisMemory"]
+from .base_memory import TensorMemory
+from .orthogonal_memory import OrthogonalBasisMemory
+from .senri_memory import SenriMemory
+
+__all__ = ["TensorMemory", "OrthogonalBasisMemory", "SenriMemory"]

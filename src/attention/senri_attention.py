@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..memory.tensor_memory import SenriMemory
+from ..memory import SenriMemory
 
 
 class SenriAttention(nn.Module):
