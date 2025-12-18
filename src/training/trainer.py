@@ -106,11 +106,13 @@ class SenriTrainer:
                 return_special_tokens_mask=True,
             )
 
+        # Note: num_proc is not used because CUDA cannot be re-initialized
+        # in forked subprocesses. Multiprocessing with CUDA requires 'spawn'
+        # start method, but datasets.map uses 'fork' by default.
         tokenized_dataset = dataset.map(
             tokenize_function,
             batched=True,
             remove_columns=dataset["train"].column_names,
-            num_proc=4,
         )
 
         # Filter out empty examples
