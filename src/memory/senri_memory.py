@@ -1,10 +1,12 @@
 """Unified Senri memory interface switching between training and inference modes."""
 
+from typing import List, Optional, Union
+
 import torch
 import torch.nn as nn
 
-from .base_memory import TensorMemory
-from .orthogonal_memory import OrthogonalBasisMemory
+from .base_memory import SVDCleaningStats, TensorMemory
+from .orthogonal_memory import OrthogonalBasisMemory, OrthogonalSVDCleaningStats
 
 
 class SenriMemory(nn.Module):
@@ -62,3 +64,35 @@ class SenriMemory(nn.Module):
             return self.training_memory.retrieve(queries)
         else:
             return self.inference_memory.retrieve(queries)
+
+    def svd_cleaning(
+        self,
+        energy_threshold: float = 0.95,
+        max_rank: Optional[int] = None,
+        basis_indices: Optional[List[int]] = None,
+    ) -> Union[SVDCleaningStats, OrthogonalSVDCleaningStats]:
+        """
+        Perform SVD-based noise removal on the memory matrices.
+
+        This is a unified interface that delegates to the appropriate memory
+        based on training mode.
+
+        Args:
+            energy_threshold: Fraction of total energy to retain. Default 0.95.
+            max_rank: Maximum rank to retain. If None, determined by energy_threshold.
+            basis_indices: (Inference only) List of basis indices to clean.
+
+        Returns:
+            SVDCleaningStats (training) or OrthogonalSVDCleaningStats (inference).
+        """
+        if self.training:
+            return self.training_memory.svd_cleaning(
+                energy_threshold=energy_threshold,
+                max_rank=max_rank,
+            )
+        else:
+            return self.inference_memory.svd_cleaning(
+                energy_threshold=energy_threshold,
+                max_rank=max_rank,
+                basis_indices=basis_indices,
+            )

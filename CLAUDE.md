@@ -78,17 +78,97 @@ output = torch.einsum('bhde,bhe->bhd', M, q) / (z @ q + eps)
 ```
 
 ```python
-# 推論時（複数メモリ）
+# 推論時（複数メモリ + Delta Rule）
 M = torch.zeros(batch, heads, hidden_dim, head_dim, head_dim)  # 基底ごと
 z = torch.zeros(batch, heads, hidden_dim, head_dim)
 
 # keyの割り当て（単位行列基底なので、最大絶対値の次元）
 basis_idx = k.abs().argmax(dim=-1)  # [batch, seq]
 
+# Delta Rule による更新（推論時のみ）
+# 既存の情報を差し引いてから新しい情報を追加
+v_existing = (M @ k) / (z^T @ k + eps)  # メモリから取得
+v_delta = v - v_existing                 # 差分を計算
+M = M + v_delta ⊗ k                      # 差分のみ追加
+
 # top-k選択
 scores = q.abs()  # [batch, heads, seq, head_dim]
 top_k_indices = scores.topk(k=top_k_memories, dim=-1).indices
 ```
+
+### Delta Rule（推論時のみ）
+
+**目的**: 重複情報の蓄積を防ぎ、メモリ効率と検索精度を向上
+
+**学習時 vs 推論時**:
+- **学習時**: 単純累積（勾配が流れ、重要度を学習）
+- **推論時**: Delta rule（重複除去、効率的なメモリ利用）
+
+```python
+# Delta rule の数式
+delta = v - retrieve(k)    # 新しい値 - 既存の値
+M = M + outer(delta, k)    # 差分のみをメモリに追加
+```
+
+**利点**:
+1. 同じ情報の重複蓄積を防止
+2. メモリ容量の効率的な利用
+3. 検索時のノイズ低減
+
+### SVD-based Memory Cleaning (Noise Removal)
+
+テンソル積メモリに蓄積されるノイズを除去するため、周期的SVDクリーニング機能を実装。
+
+**原理**: SVDによる低ランク近似（Eckart-Young定理に基づく最適近似）
+
+```python
+# 基本的な使用方法
+from src.memory import SenriMemory, SVDCleaningStats
+
+memory = SenriMemory(num_heads=14, head_dim=64, hidden_size=896)
+memory.reset(batch_size=1, device=device, dtype=dtype)
+
+# メモリ更新後、ノイズ除去を実行
+stats = memory.svd_cleaning(
+    energy_threshold=0.95,  # 95%のエネルギーを保持
+    max_rank=None,          # Noneの場合、energy_thresholdで決定
+)
+
+print(f"Original rank: {stats.original_rank}")
+print(f"Retained rank: {stats.retained_rank}")
+print(f"Energy retained: {stats.energy_retained:.2%}")
+```
+
+**パラメータ**:
+
+| パラメータ | 型 | デフォルト | 説明 |
+|-----------|-----|----------|------|
+| `energy_threshold` | float | 0.95 | 保持するエネルギーの割合（特異値の二乗和） |
+| `max_rank` | int | None | 明示的なランク上限。Noneの場合はenergy_thresholdで決定 |
+| `basis_indices` | List[int] | None | (推論時のみ) クリーニングする基底インデックス |
+
+**実行タイミング（未定、将来実装予定）**:
+- ユーザー入力待機中（アイドル時）
+- 一定のメモリ更新回数ごと
+- メモリ使用量が閾値を超えた時
+
+**統計情報の活用**:
+
+```python
+# 詳細な統計を取得
+stats = memory.svd_cleaning(energy_threshold=0.90)
+
+# 特異値の分布を確認（デバッグ用）
+print(f"Top singular values: {stats.singular_values_before[0, :5]}")
+
+# OrthogonalBasisMemory（推論時）の場合
+# stats.per_basis_stats で各基底の詳細統計を取得可能
+```
+
+**注意事項**:
+- SVD計算は O(n³) の計算量。頻繁な実行は避ける
+- `torch.no_grad()` 内で実行されるため、勾配は計算されない
+- メモリ初期化前に呼び出すと `RuntimeError` が発生
 
 ### HuggingFace Compatibility
 
