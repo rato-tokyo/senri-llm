@@ -11,7 +11,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from ..memory import SenriMemory
+from ..memory import TensorMemory
 
 
 class SenriAttention(nn.Module):
@@ -68,7 +68,7 @@ class SenriAttention(nn.Module):
         )
 
         # Memory (operates on full hidden_size after expanding KV)
-        self.memory = SenriMemory(
+        self.memory = TensorMemory(
             memory_dim=hidden_size,
             eps=eps,
         )

@@ -206,9 +206,8 @@ class NIAHEvaluator:
             # Reset memory before processing new sequence
             # This is critical for long-context evaluation
             if hasattr(self.model, "reset_memory"):
-                batch_size = inputs["input_ids"].shape[0]
                 dtype = next(self.model.parameters()).dtype
-                self.model.reset_memory(batch_size, self.device, dtype)
+                self.model.reset_memory(self.device, dtype)
 
             # Generate
             with torch.no_grad():

@@ -263,7 +263,7 @@ def verify_conversion(
 
     # Generate some text
     senri_model.eval()
-    senri_model.reset_memory(1, device=torch.device(device), dtype=torch.float32)
+    senri_model.reset_memory(device=torch.device(device), dtype=torch.float32)
 
     generated = senri_model.generate(
         inputs.input_ids,

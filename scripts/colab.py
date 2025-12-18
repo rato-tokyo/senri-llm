@@ -102,7 +102,7 @@ def test_model():
     print(f"  Training mode output shape: {output_train.shape}")
 
     attention.eval()
-    attention.reset_memory(batch_size, device, hidden_states.dtype)
+    attention.reset_memory(device, hidden_states.dtype)
     with torch.no_grad():
         output_eval, _, _ = attention(hidden_states)
     print(f"  Inference mode output shape: {output_eval.shape}")

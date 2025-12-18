@@ -66,11 +66,11 @@ class SenriModel(SenriPreTrainedModel):
     def set_input_embeddings(self, value):
         self.embed_tokens = value
 
-    def reset_memory(self, batch_size: int, device: torch.device, dtype: torch.dtype):
+    def reset_memory(self, device: torch.device, dtype: torch.dtype):
         """Reset memory for all Senri Memory layers."""
         for layer in self.layers:
             if hasattr(layer.self_attn, "reset_memory"):
-                layer.self_attn.reset_memory(batch_size, device, dtype)
+                layer.self_attn.reset_memory(device, dtype)
 
     def forward(
         self,
@@ -243,9 +243,9 @@ class SenriForCausalLM(SenriPreTrainedModel):
     def get_decoder(self):
         return self.model
 
-    def reset_memory(self, batch_size: int, device: torch.device, dtype: torch.dtype):
+    def reset_memory(self, device: torch.device, dtype: torch.dtype):
         """Reset memory for all Senri Memory layers."""
-        self.model.reset_memory(batch_size, device, dtype)
+        self.model.reset_memory(device, dtype)
 
     def forward(
         self,

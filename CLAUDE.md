@@ -42,6 +42,36 @@ git checkout <hash-before-simplification> -- src/
 - バッチ共有メモリ `[d, d]`
 - 完全detach（安定性優先）
 
+### Why Memory-Only (No Local Attention)
+
+**線形AttentionとテンソルメモリはNoPEにおいて数学的に等価です。**
+
+```
+# 線形Attention
+output = φ(Q) @ (φ(K)^T @ V)
+
+# テンソル積メモリ
+M = M + φ(K)^T @ V    # 更新
+output = φ(Q) @ M      # 検索
+```
+
+両者とも `φ(K)^T @ V`（外積の累積）という同一の操作を行います。
+
+**参考文献**:
+- [Linear Transformers Are Secretly Fast Weight Programmers](https://arxiv.org/pdf/2102.11174) - 線形Attentionと外積連想記憶の数学的等価性を証明
+- [Infini-attention](https://arxiv.org/abs/2404.07143) - Google DeepMindによる線形Attention＋圧縮メモリ
+
+**NoPE（位置エンコーディングなし）の場合**:
+- ローカルAttentionとメモリの区別が不要
+- 同じ外積累積操作を2回行う意味がない
+- メモリのみで十分（シンプルかつ効率的）
+
+**RoPEを使う場合のみ分離が意味を持つ**:
+- ローカル: RoPE適用（位置情報あり）
+- メモリ: RoPEなし（位置に依存しない長期記憶）
+
+現在のsenri-llmはNoPE設計のため、メモリのみの実装が理論的に正しい選択です。
+
 ### Base Model: SmolLM-135M
 
 | 項目 | 値 |
@@ -93,21 +123,29 @@ denominator = torch.matmul(sigma_queries, z).clamp(min=eps)
 output = numerator / denominator.unsqueeze(-1)
 ```
 
-### SenriAttention（メモリのみ）
+### SenriAttention（メモリのみ、GQA対応）
 
 ```python
 class SenriAttention(nn.Module):
-    def __init__(self, hidden_size, eps=1e-6, layer_idx=0):
-        self.q_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.k_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.v_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.o_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.memory = SenriMemory(memory_dim=hidden_size, eps=eps)
+    def __init__(self, hidden_size, num_attention_heads, num_key_value_heads, eps=1e-6, layer_idx=0):
+        self.head_dim = hidden_size // num_attention_heads
+        self.num_key_value_groups = num_attention_heads // num_key_value_heads
+
+        # GQA projections (SmolLMと同じ構造)
+        self.q_proj = nn.Linear(hidden_size, num_attention_heads * self.head_dim, bias=True)
+        self.k_proj = nn.Linear(hidden_size, num_key_value_heads * self.head_dim, bias=True)
+        self.v_proj = nn.Linear(hidden_size, num_key_value_heads * self.head_dim, bias=True)
+        self.o_proj = nn.Linear(num_attention_heads * self.head_dim, hidden_size, bias=False)
+        self.memory = TensorMemory(memory_dim=hidden_size, eps=eps)
 
     def forward(self, hidden_states, ...):
         q = self.q_proj(hidden_states)
         k = self.k_proj(hidden_states)
         v = self.v_proj(hidden_states)
+
+        # KVをQに合わせて展開
+        k = self._repeat_kv(k, self.num_key_value_groups)
+        v = self._repeat_kv(v, self.num_key_value_groups)
 
         if self.training:
             self.memory.reset(device, dtype)
@@ -125,13 +163,9 @@ class SenriAttention(nn.Module):
 class TensorMemory:
     """バッチ共有テンソル積メモリ [d, d]"""
 
-# src/memory/senri_memory.py
-class SenriMemory:
-    """TensorMemoryのラッパー"""
-
 # src/attention/senri_attention.py
 class SenriAttention:
-    """メモリのみのAttention（ローカルなし）"""
+    """メモリのみのAttention（GQA対応）"""
 
 # src/configuration_senri.py
 class SenriConfig(LlamaConfig):

@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from src.configuration_senri import SenriConfig
-from src.memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
+from src.memory import TensorMemory
 from src.attention.senri_attention import SenriAttention
 
 
@@ -14,12 +14,9 @@ class TestSenriConfig:
     def test_default_config(self):
         config = SenriConfig()
         assert config.model_type == "senri"
-        assert config.sliding_window_size == 4096
-        assert config.chunk_size == 64
-        assert config.top_k_memories == 64
-        assert config.num_memory_layers == 3
-        assert config.first_memory_layer == 12
-        assert config.memory_layer_interval == 4
+        assert config.num_memory_layers == 2
+        assert config.first_memory_layer == 10
+        assert config.memory_layer_interval == 10
 
     def test_memory_layer_indices(self):
         config = SenriConfig(
@@ -46,164 +43,88 @@ class TestSenriConfig:
 
 
 class TestTensorMemory:
-    """Tests for TensorMemory (training mode)."""
+    """Tests for TensorMemory (batch-shared, simplified)."""
 
     def test_init(self):
-        memory = TensorMemory(num_heads=14, head_dim=64)
-        assert memory.num_heads == 14
-        assert memory.head_dim == 64
+        memory = TensorMemory(memory_dim=576)
+        assert memory.memory_dim == 576
+        assert memory.eps == 1e-6
 
     def test_reset(self):
-        memory = TensorMemory(num_heads=14, head_dim=64)
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
-        assert memory.M.shape == (2, 14, 64, 64)
-        assert memory.z.shape == (2, 14, 64)
+        memory = TensorMemory(memory_dim=576)
+        memory.reset(device=torch.device("cpu"), dtype=torch.float32)
+        assert memory.M.shape == (576, 576)
+        assert memory.z.shape == (576,)
 
     def test_update_and_retrieve(self):
-        memory = TensorMemory(num_heads=14, head_dim=64)
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
+        memory = TensorMemory(memory_dim=576)
+        memory.reset(device=torch.device("cpu"), dtype=torch.float32)
 
-        k = torch.randn(2, 14, 100, 64)
-        v = torch.randn(2, 14, 100, 64)
-        q = torch.randn(2, 14, 50, 64)
-
-        memory.update(k, v)
-        output = memory.retrieve(q)
-
-        assert output.shape == (2, 14, 50, 64)
-
-
-class TestOrthogonalBasisMemory:
-    """Tests for OrthogonalBasisMemory (inference mode)."""
-
-    def test_init(self):
-        memory = OrthogonalBasisMemory(
-            num_heads=14,
-            head_dim=64,
-            hidden_size=896,
-            top_k=64,
-        )
-        assert memory.num_heads == 14
-        assert memory.head_dim == 64
-        assert memory.hidden_size == 896
-        assert memory.top_k == 64
-
-    def test_reset(self):
-        memory = OrthogonalBasisMemory(
-            num_heads=14,
-            head_dim=64,
-            hidden_size=896,
-            top_k=64,
-        )
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
-        assert memory.M.shape == (2, 14, 896, 64, 64)
-        assert memory.z.shape == (2, 14, 896, 64)
-
-    def test_update_and_retrieve(self):
-        memory = OrthogonalBasisMemory(
-            num_heads=14,
-            head_dim=64,
-            hidden_size=896,
-            top_k=64,
-        )
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
-
-        k = torch.randn(2, 14, 100, 64)
-        v = torch.randn(2, 14, 100, 64)
-        q = torch.randn(2, 14, 50, 64)
+        # keys, values: [batch, seq, memory_dim]
+        k = torch.randn(2, 100, 576)
+        v = torch.randn(2, 100, 576)
+        q = torch.randn(2, 50, 576)
 
         memory.update(k, v)
         output = memory.retrieve(q)
 
-        assert output.shape == (2, 14, 50, 64)
+        assert output.shape == (2, 50, 576)
 
+    def test_retrieve_empty_memory(self):
+        """Test that retrieve returns zeros when memory is empty."""
+        memory = TensorMemory(memory_dim=576)
+        memory.reset(device=torch.device("cpu"), dtype=torch.float32)
 
-class TestSenriMemory:
-    """Tests for SenriMemory (unified interface)."""
-
-    def test_training_mode(self):
-        memory = SenriMemory(
-            num_heads=14,
-            head_dim=64,
-            hidden_size=896,
-            top_k=64,
-        )
-        memory.train()
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
-
-        k = torch.randn(2, 14, 100, 64)
-        v = torch.randn(2, 14, 100, 64)
-        q = torch.randn(2, 14, 50, 64)
-
-        memory.update(k, v)
+        q = torch.randn(2, 50, 576)
         output = memory.retrieve(q)
 
-        assert output.shape == (2, 14, 50, 64)
-
-    def test_eval_mode(self):
-        memory = SenriMemory(
-            num_heads=14,
-            head_dim=64,
-            hidden_size=896,
-            top_k=64,
-        )
-        memory.eval()
-        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
-
-        k = torch.randn(2, 14, 100, 64)
-        v = torch.randn(2, 14, 100, 64)
-        q = torch.randn(2, 14, 50, 64)
-
-        memory.update(k, v)
-        output = memory.retrieve(q)
-
-        assert output.shape == (2, 14, 50, 64)
+        assert output.shape == (2, 50, 576)
+        assert torch.allclose(output, torch.zeros_like(output))
 
 
 class TestSenriAttention:
-    """Tests for SenriAttention."""
+    """Tests for SenriAttention (GQA compatible)."""
 
     def test_init(self):
         attn = SenriAttention(
-            hidden_size=896,
-            num_attention_heads=14,
-            num_key_value_heads=2,
-            head_dim=64,
+            hidden_size=576,
+            num_attention_heads=9,
+            num_key_value_heads=3,
         )
-        assert attn.hidden_size == 896
-        assert attn.num_attention_heads == 14
-        assert attn.num_key_value_heads == 2
+        assert attn.hidden_size == 576
+        assert attn.num_attention_heads == 9
+        assert attn.num_key_value_heads == 3
+        assert attn.head_dim == 64
+        assert attn.num_key_value_groups == 3
 
     def test_forward_training(self):
         attn = SenriAttention(
-            hidden_size=896,
-            num_attention_heads=14,
-            num_key_value_heads=2,
-            head_dim=64,
+            hidden_size=576,
+            num_attention_heads=9,
+            num_key_value_heads=3,
         )
         attn.train()
 
-        hidden_states = torch.randn(2, 128, 896)
+        hidden_states = torch.randn(2, 128, 576)
         output, _, _ = attn(hidden_states)
 
-        assert output.shape == (2, 128, 896)
+        assert output.shape == (2, 128, 576)
 
     def test_forward_eval(self):
         attn = SenriAttention(
-            hidden_size=896,
-            num_attention_heads=14,
-            num_key_value_heads=2,
-            head_dim=64,
+            hidden_size=576,
+            num_attention_heads=9,
+            num_key_value_heads=3,
         )
         attn.eval()
 
-        hidden_states = torch.randn(2, 128, 896)
-        attn.reset_memory(2, hidden_states.device, hidden_states.dtype)
+        hidden_states = torch.randn(2, 128, 576)
+        attn.reset_memory(hidden_states.device, hidden_states.dtype)
 
         with torch.no_grad():
             output, _, _ = attn(hidden_states)
 
-        assert output.shape == (2, 128, 896)
+        assert output.shape == (2, 128, 576)
 
 
 if __name__ == "__main__":
