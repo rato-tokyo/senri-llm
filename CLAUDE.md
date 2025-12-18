@@ -275,15 +275,45 @@ M = M + K.T @ V
    - Delta更新のオプション実装
    - 32K以上の長文学習
 
+### メモリ勾配についての設計判断
+
+**論文の仕様（BPTT）**:
+> "Each Infini-attention layer is trained with back-propagation through time (BPTT) by computing the gradient w.r.t the compressive memory states"
+
+論文はセグメント処理を前提とし、セグメント間でメモリを通じて勾配が流れる。
+
+**現在の実装（簡略化BPTT）**:
+```python
+# 累積状態のみdetach、現在の更新は勾配を維持
+self.M = self.M.detach() + delta_M  # delta_Mには勾配あり
+self.z = self.z.detach() + delta_z
+```
+
+- 各サンプル内で `update → retrieve` 経路の勾配は流れる
+- サンプル間（セグメント間）の勾配は流れない（毎回リセット）
+- new-llmは完全detach（勾配なし）だが、senri-llmは現在サンプル内で勾配維持
+
+**比較**:
+| 項目 | 論文（BPTT） | new-llm | senri-llm |
+|------|-------------|---------|-----------|
+| セグメント間勾配 | あり | なし | なし |
+| サンプル内勾配 | あり | なし | **あり** |
+| メモリ学習 | 完全 | ゲート経由のみ | ゲート＋メモリ経由 |
+
+**妥協の理由**:
+- 単一forward-pass学習ではセグメント間BPTTは不可能
+- しかし、サンプル内勾配によりメモリの使い方は学習可能
+
 ### 現在の期待される精度
 
 - **基本動作**: ✅ 期待できる
 - **メモリの効果が観測できる**: ✅ 期待できる
 - **NIAHタスクでの改善**: ✅ 期待できる
 
-**根拠**: 論文のLinear更新（Delta更新なし）でも良好な結果を示している。
-new-llmプロジェクト（同じアーキテクチャ）は正常に動作しており、
-主要な実装差分を修正した。
+**根拠**:
+- 論文のLinear更新（Delta更新なし）でも良好な結果を示している
+- new-llmプロジェクト（完全detach）でも動作している
+- senri-llmはサンプル内勾配を維持しており、new-llmより学習効率が良い可能性
 
 ## Training vs Inference Mode（現在: シンプル化版）
 
