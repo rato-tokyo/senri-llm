@@ -179,17 +179,23 @@ class SenriAttention(nn.Module):
             torch.ones(seq_len, seq_len, device=query.device, dtype=torch.bool),
             diagonal=1,
         )
-        attn_weights = attn_weights.masked_fill(causal_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
+        attn_weights = attn_weights.masked_fill(
+            causal_mask.unsqueeze(0).unsqueeze(0), float("-inf")
+        )
 
         # Apply sliding window mask if needed
         if seq_len > self.sliding_window_size:
             row_idx = torch.arange(seq_len, device=query.device).unsqueeze(1)
             col_idx = torch.arange(seq_len, device=query.device).unsqueeze(0)
             window_mask = (row_idx - col_idx) >= self.sliding_window_size
-            attn_weights = attn_weights.masked_fill(window_mask.unsqueeze(0).unsqueeze(0), float("-inf"))
+            attn_weights = attn_weights.masked_fill(
+                window_mask.unsqueeze(0).unsqueeze(0), float("-inf")
+            )
 
         # Softmax and apply to values
-        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+            query.dtype
+        )
         output = torch.matmul(attn_weights, value)
 
         return output
@@ -315,7 +321,9 @@ class SenriAttention(nn.Module):
 
             # Extract segment data
             # For memory: raw Q, K, V without positional encoding (NoPE)
-            seg_query = query_states[:, :, start:end, :]  # [batch, heads, seg_len, head_dim]
+            seg_query = query_states[
+                :, :, start:end, :
+            ]  # [batch, heads, seg_len, head_dim]
             seg_key = key_expanded[:, :, start:end, :]
             seg_value = value_expanded[:, :, start:end, :]
 
@@ -326,8 +334,12 @@ class SenriAttention(nn.Module):
 
             # Process segment with paper-compliant order
             seg_output = self._process_segment(
-                seg_query, seg_key, seg_value,
-                seg_query_local, seg_key_local, seg_value_local,
+                seg_query,
+                seg_key,
+                seg_value,
+                seg_query_local,
+                seg_key_local,
+                seg_value_local,
             )
             outputs.append(seg_output)
 
