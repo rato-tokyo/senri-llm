@@ -83,29 +83,30 @@ class TensorMemory(nn.Module):
         """
         Update memory with new key-value pairs.
 
-        Memory updates are detached from the computation graph to prevent
-        backward through multiple forward passes. This is standard practice
-        for recurrent memory in transformers.
-
         Args:
             keys: [batch, heads, seq, head_dim]
             values: [batch, heads, seq, head_dim]
-        """
-        # Detach to prevent backward through memory state across batches
-        keys_detached = keys.detach()
-        values_detached = values.detach()
 
+        Note:
+            During training, memory is reset at the start of each forward pass,
+            so we don't need to worry about gradient accumulation across samples.
+            Gradients flow through the current sample's update → retrieve path.
+        """
         # Outer product: v ⊗ k -> [batch, heads, head_dim, head_dim]
         # Sum over sequence dimension
         # values: [b, h, s, d] -> [b, h, d, s]
         # keys: [b, h, s, d]
         # einsum: bhs d, bhs e -> bh de (sum over s)
-        delta_M = torch.einsum("bhsd,bhse->bhde", values_detached, keys_detached)
-        self.M = self.M + delta_M
+        delta_M = torch.einsum("bhsd,bhse->bhde", values, keys)
+
+        # Detach accumulated state but keep gradient for current update
+        # This prevents gradient explosion from accumulating across training samples
+        # while still allowing learning within each sample
+        self.M = self.M.detach() + delta_M
 
         # Sum keys for normalization
-        delta_z = keys_detached.sum(dim=2)  # [batch, heads, head_dim]
-        self.z = self.z + delta_z
+        delta_z = keys.sum(dim=2)  # [batch, heads, head_dim]
+        self.z = self.z.detach() + delta_z
 
     def retrieve(
         self,

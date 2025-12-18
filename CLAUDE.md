@@ -580,6 +580,29 @@ def forward(self, ...):
 **注意**: この順序変更は厳密な因果性を緩和するが、単一forward-pass学習では必要。
 論文準拠のチャンク単位処理を実装すれば、retrieve→update順序でも動作する。
 
+### 6. メモリ更新時の過度なdetach（致命的）
+```python
+# Bad: keys/valuesをdetachしてメモリ更新
+def update(self, keys, values):
+    keys_detached = keys.detach()      # ❌ 勾配経路が完全に切断
+    values_detached = values.detach()  # ❌ メモリから学習できない
+    delta_M = einsum(values_detached, keys_detached)
+    self.M = self.M + delta_M
+
+# Good: 累積状態のみdetach、現在の更新は勾配を維持
+def update(self, keys, values):
+    delta_M = einsum(values, keys)     # ✅ 現在の入力からの勾配を維持
+    self.M = self.M.detach() + delta_M # ✅ 過去の累積のみdetach
+```
+
+**症状**: eval_loss が NaN、学習が全く進まない、メモリゲートの学習のみ発生
+
+**原理**:
+- 学習時、各サンプルは独立（毎回メモリリセット）
+- 現在サンプル内の update → retrieve 勾配経路は必要
+- 複数サンプル間での勾配累積は不要（detachで防ぐ）
+- `self.M.detach() + delta_M` で「過去をカット、現在は維持」を実現
+
 ## Debugging Tips
 
 ### メモリ状態の確認
