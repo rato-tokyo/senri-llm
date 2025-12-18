@@ -12,8 +12,8 @@ dataset:
 # Training hyperparameters
 training:
   num_epochs: 3
-  batch_size: 2
-  gradient_accumulation_steps: 4
+  batch_size: 1  # Reduced for 2048 token context on L4/T4 GPU
+  gradient_accumulation_steps: 8  # Increased to maintain effective batch size
   learning_rate: 5.0e-5
   weight_decay: 0.01
   warmup_ratio: 0.1
