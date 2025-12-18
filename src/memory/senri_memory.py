@@ -34,6 +34,8 @@ class SenriMemory(nn.Module):
 
     Training: Uses TensorMemory (single memory, standard Infini Attention)
     Inference: Uses OrthogonalBasisMemory (multiple memories with basis routing)
+
+    Memory is lazily initialized to avoid allocating inference memory during training.
     """
 
     def __init__(
@@ -56,10 +58,27 @@ class SenriMemory(nn.Module):
         """
         super().__init__()
 
+        # Store config for lazy initialization
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.hidden_size = hidden_size
+        self.top_k = top_k
+        self.eps = eps
+
+        # Training memory is always needed (small: [batch, heads, head_dim, head_dim])
         self.training_memory = TensorMemory(num_heads, head_dim, eps)
-        self.inference_memory = OrthogonalBasisMemory(
-            num_heads, head_dim, hidden_size, top_k, eps
-        )
+
+        # Inference memory is lazily initialized only when needed (large memory)
+        self._inference_memory: Optional[OrthogonalBasisMemory] = None
+
+    @property
+    def inference_memory(self) -> OrthogonalBasisMemory:
+        """Lazily create inference memory only when needed."""
+        if self._inference_memory is None:
+            self._inference_memory = OrthogonalBasisMemory(
+                self.num_heads, self.head_dim, self.hidden_size, self.top_k, self.eps
+            )
+        return self._inference_memory
 
     def reset(self, batch_size: int, device: torch.device, dtype: torch.dtype):
         """Reset appropriate memory based on training mode."""
@@ -67,7 +86,7 @@ class SenriMemory(nn.Module):
             # Only reset training memory during training to save GPU memory
             self.training_memory.reset(batch_size, device, dtype)
         else:
-            # Reset inference memory during inference
+            # Reset inference memory during inference (lazy init if needed)
             self.inference_memory.reset(batch_size, device, dtype)
 
     def update(self, keys: torch.Tensor, values: torch.Tensor):
