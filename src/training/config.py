@@ -61,7 +61,6 @@ class TrainingConfig:
             weight_decay=self.weight_decay,
             warmup_ratio=self.warmup_ratio,
             lr_scheduler_type=self.lr_scheduler_type,
-            logging_steps=self.logging_steps,
             eval_strategy="steps",
             eval_steps=self.eval_steps,
             save_strategy="steps",
@@ -75,4 +74,6 @@ class TrainingConfig:
             report_to="none",
             seed=self.seed,
             gradient_checkpointing=self.gradient_checkpointing,
+            disable_tqdm=True,  # Disable verbose progress bar
+            logging_strategy="epoch",  # Log only at epoch end
         )
