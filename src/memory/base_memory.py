@@ -49,13 +49,16 @@ class TensorMemory(nn.Module):
         """
         # M: [batch, heads, head_dim, head_dim]
         self.M = torch.zeros(
-            batch_size, self.num_heads, self.head_dim, self.head_dim,
-            device=device, dtype=dtype
+            batch_size,
+            self.num_heads,
+            self.head_dim,
+            self.head_dim,
+            device=device,
+            dtype=dtype,
         )
         # z: [batch, heads, head_dim]
         self.z = torch.zeros(
-            batch_size, self.num_heads, self.head_dim,
-            device=device, dtype=dtype
+            batch_size, self.num_heads, self.head_dim, device=device, dtype=dtype
         )
 
     def update(
@@ -75,7 +78,7 @@ class TensorMemory(nn.Module):
         # values: [b, h, s, d] -> [b, h, d, s]
         # keys: [b, h, s, d]
         # einsum: bhs d, bhs e -> bh de (sum over s)
-        delta_M = torch.einsum('bhsd,bhse->bhde', values, keys)
+        delta_M = torch.einsum("bhsd,bhse->bhde", values, keys)
         self.M = self.M + delta_M
 
         # Sum keys for normalization
@@ -97,11 +100,11 @@ class TensorMemory(nn.Module):
         """
         # M @ q: [batch, heads, head_dim, head_dim] @ [batch, heads, seq, head_dim]
         # -> [batch, heads, seq, head_dim]
-        numerator = torch.einsum('bhde,bhse->bhsd', self.M, queries)
+        numerator = torch.einsum("bhde,bhse->bhsd", self.M, queries)
 
         # z^T @ q: [batch, heads, head_dim] @ [batch, heads, seq, head_dim]
         # -> [batch, heads, seq]
-        denominator = torch.einsum('bhd,bhsd->bhs', self.z, queries)
+        denominator = torch.einsum("bhd,bhsd->bhs", self.z, queries)
         denominator = denominator.unsqueeze(-1) + self.eps  # [batch, heads, seq, 1]
 
         return numerator / denominator

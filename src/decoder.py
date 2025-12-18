@@ -46,7 +46,9 @@ class SenriDecoderLayer(nn.Module):
 
         # Layer norms
         self.input_layernorm = SenriRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.post_attention_layernorm = SenriRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.post_attention_layernorm = SenriRMSNorm(
+            config.hidden_size, eps=config.rms_norm_eps
+        )
 
     def forward(
         self,

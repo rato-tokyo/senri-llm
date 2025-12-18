@@ -88,7 +88,7 @@ class SenriAttention(nn.Module):
             )
 
         # Scaling factor
-        self.scale = head_dim ** -0.5
+        self.scale = head_dim**-0.5
 
     def _repeat_kv(self, hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
         """
@@ -130,6 +130,7 @@ class SenriAttention(nn.Module):
         Returns:
             q_embed, k_embed: Rotated query and key tensors.
         """
+
         # Standard rotary embedding application
         def rotate_half(x):
             x1 = x[..., : x.shape[-1] // 2]
@@ -190,12 +191,14 @@ class SenriAttention(nn.Module):
             combined_mask = causal_mask & window_mask
             combined_mask = combined_mask.unsqueeze(0).unsqueeze(0)
 
-            attn_weights = attn_weights.masked_fill(~combined_mask, float('-inf'))
+            attn_weights = attn_weights.masked_fill(~combined_mask, float("-inf"))
         elif attention_mask is not None:
             attn_weights = attn_weights + attention_mask
 
         # Softmax and apply to values
-        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query.dtype)
+        attn_weights = F.softmax(attn_weights, dim=-1, dtype=torch.float32).to(
+            query.dtype
+        )
         output = torch.matmul(attn_weights, value)
 
         return output
@@ -210,7 +213,11 @@ class SenriAttention(nn.Module):
         past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         output_attentions: bool = False,
         use_cache: bool = False,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+    ) -> Tuple[
+        torch.Tensor,
+        Optional[torch.Tensor],
+        Optional[Tuple[torch.Tensor, torch.Tensor]],
+    ]:
         """
         Forward pass for Senri Attention.
 

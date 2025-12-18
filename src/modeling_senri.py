@@ -45,9 +45,14 @@ class SenriModel(SenriPreTrainedModel):
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
 
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        self.embed_tokens = nn.Embedding(
+            config.vocab_size, config.hidden_size, self.padding_idx
+        )
         self.layers = nn.ModuleList(
-            [SenriDecoderLayer(config, layer_idx) for layer_idx in range(config.num_hidden_layers)]
+            [
+                SenriDecoderLayer(config, layer_idx)
+                for layer_idx in range(config.num_hidden_layers)
+            ]
         )
         self.norm = SenriRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
@@ -63,7 +68,7 @@ class SenriModel(SenriPreTrainedModel):
     def reset_memory(self, batch_size: int, device: torch.device, dtype: torch.dtype):
         """Reset memory for all Senri Memory layers."""
         for layer in self.layers:
-            if hasattr(layer.self_attn, 'reset_memory'):
+            if hasattr(layer.self_attn, "reset_memory"):
                 layer.self_attn.reset_memory(batch_size, device, dtype)
 
     def forward(
@@ -78,10 +83,20 @@ class SenriModel(SenriPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
         use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds")
@@ -101,14 +116,21 @@ class SenriModel(SenriPreTrainedModel):
 
         # Create position IDs
         if position_ids is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
+            past_seen_tokens = (
+                past_key_values.get_seq_length() if past_key_values is not None else 0
+            )
             position_ids = torch.arange(  # type: ignore[assignment]
-                past_seen_tokens, past_seen_tokens + seq_length, dtype=torch.long, device=inputs_embeds.device
+                past_seen_tokens,
+                past_seen_tokens + seq_length,
+                dtype=torch.long,
+                device=inputs_embeds.device,
             ).unsqueeze(0)
 
         # Create causal mask
         if attention_mask is None:
-            attention_mask = torch.ones(batch_size, seq_length, device=inputs_embeds.device)
+            attention_mask = torch.ones(
+                batch_size, seq_length, device=inputs_embeds.device
+            )
 
         # 4D attention mask
         attention_mask = self._prepare_decoder_attention_mask(
@@ -117,8 +139,12 @@ class SenriModel(SenriPreTrainedModel):
 
         hidden_states = inputs_embeds
 
-        all_hidden_states: Optional[Tuple[torch.Tensor, ...]] = () if output_hidden_states else None
-        all_self_attns: Optional[Tuple[torch.Tensor, ...]] = () if output_attentions else None
+        all_hidden_states: Optional[Tuple[torch.Tensor, ...]] = (
+            () if output_hidden_states else None
+        )
+        all_self_attns: Optional[Tuple[torch.Tensor, ...]] = (
+            () if output_attentions else None
+        )
         next_decoder_cache = None
 
         for decoder_layer in self.layers:
@@ -148,7 +174,16 @@ class SenriModel(SenriPreTrainedModel):
             all_hidden_states = all_hidden_states + (hidden_states,)
 
         if not return_dict:
-            return tuple(v for v in [hidden_states, next_decoder_cache, all_hidden_states, all_self_attns] if v is not None)
+            return tuple(
+                v
+                for v in [
+                    hidden_states,
+                    next_decoder_cache,
+                    all_hidden_states,
+                    all_self_attns,
+                ]
+                if v is not None
+            )
 
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
@@ -157,7 +192,9 @@ class SenriModel(SenriPreTrainedModel):
             attentions=all_self_attns,  # type: ignore[arg-type]
         )
 
-    def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values):
+    def _prepare_decoder_attention_mask(
+        self, attention_mask, input_shape, inputs_embeds, past_key_values
+    ):
         # Create causal mask
         batch_size, seq_length = input_shape
         device = inputs_embeds.device
@@ -215,9 +252,19 @@ class SenriForCausalLM(SenriPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions = (
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
+        )
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         outputs = self.model(
             input_ids=input_ids,
@@ -257,7 +304,12 @@ class SenriForCausalLM(SenriPreTrainedModel):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+        self,
+        input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        **kwargs,
     ):
         if past_key_values is not None:
             input_ids = input_ids[:, -1:]

@@ -59,13 +59,22 @@ class OrthogonalBasisMemory(nn.Module):
         """
         # M: [batch, heads, hidden_size, head_dim, head_dim]
         self.M = torch.zeros(
-            batch_size, self.num_heads, self.hidden_size, self.head_dim, self.head_dim,
-            device=device, dtype=dtype
+            batch_size,
+            self.num_heads,
+            self.hidden_size,
+            self.head_dim,
+            self.head_dim,
+            device=device,
+            dtype=dtype,
         )
         # z: [batch, heads, hidden_size, head_dim]
         self.z = torch.zeros(
-            batch_size, self.num_heads, self.hidden_size, self.head_dim,
-            device=device, dtype=dtype
+            batch_size,
+            self.num_heads,
+            self.hidden_size,
+            self.head_dim,
+            device=device,
+            dtype=dtype,
         )
 
     def _get_key_assignments(self, keys: torch.Tensor) -> torch.Tensor:
@@ -87,11 +96,11 @@ class OrthogonalBasisMemory(nn.Module):
         # For simplicity, we use the first hidden_size dimensions of the key
         # or repeat if head_dim < hidden_size
         if self.head_dim >= self.hidden_size:
-            k_proj = keys[..., :self.hidden_size]
+            k_proj = keys[..., : self.hidden_size]
         else:
             # Repeat keys to match hidden_size
             repeats = (self.hidden_size + self.head_dim - 1) // self.head_dim
-            k_proj = keys.repeat(1, 1, 1, repeats)[..., :self.hidden_size]
+            k_proj = keys.repeat(1, 1, 1, repeats)[..., : self.hidden_size]
 
         # argmax over the projected dimension
         assignments = k_proj.abs().argmax(dim=-1)  # [batch, heads, seq]
@@ -125,7 +134,7 @@ class OrthogonalBasisMemory(nn.Module):
             v_masked = values * mask.float()
 
             # Update memory i
-            delta_M = torch.einsum('bhsd,bhse->bhde', v_masked, k_masked)
+            delta_M = torch.einsum("bhsd,bhse->bhde", v_masked, k_masked)
             self.M[:, :, i] = self.M[:, :, i] + delta_M
 
             delta_z = k_masked.sum(dim=2)
@@ -149,10 +158,10 @@ class OrthogonalBasisMemory(nn.Module):
         # Compute similarity scores with each basis (identity matrix)
         # For identity basis: score_i = |q_i|
         if head_dim >= self.hidden_size:
-            q_proj = queries[..., :self.hidden_size]
+            q_proj = queries[..., : self.hidden_size]
         else:
             repeats = (self.hidden_size + head_dim - 1) // head_dim
-            q_proj = queries.repeat(1, 1, 1, repeats)[..., :self.hidden_size]
+            q_proj = queries.repeat(1, 1, 1, repeats)[..., : self.hidden_size]
 
         scores = q_proj.abs()  # [batch, heads, seq, hidden_size]
 
@@ -166,8 +175,12 @@ class OrthogonalBasisMemory(nn.Module):
 
         # Retrieve from selected memories and combine
         output = torch.zeros(
-            batch_size, num_heads, seq_len, head_dim,
-            device=queries.device, dtype=queries.dtype
+            batch_size,
+            num_heads,
+            seq_len,
+            head_dim,
+            device=queries.device,
+            dtype=queries.dtype,
         )
 
         for k_idx in range(self.top_k):
@@ -184,14 +197,18 @@ class OrthogonalBasisMemory(nn.Module):
 
             # Use advanced indexing to gather
             # mem_indices: [batch, heads, seq]
-            M_selected = self.M[batch_idx, head_idx, mem_indices]  # [batch, heads, seq, head_dim, head_dim]
-            z_selected = self.z[batch_idx, head_idx, mem_indices]  # [batch, heads, seq, head_dim]
+            M_selected = self.M[
+                batch_idx, head_idx, mem_indices
+            ]  # [batch, heads, seq, head_dim, head_dim]
+            z_selected = self.z[
+                batch_idx, head_idx, mem_indices
+            ]  # [batch, heads, seq, head_dim]
 
             # Compute retrieval for this memory
             # M @ q
-            numerator = torch.einsum('bhsde,bhse->bhsd', M_selected, queries)
+            numerator = torch.einsum("bhsde,bhse->bhsd", M_selected, queries)
             # z^T @ q
-            denominator = torch.einsum('bhsd,bhsd->bhs', z_selected, queries)
+            denominator = torch.einsum("bhsd,bhsd->bhs", z_selected, queries)
             denominator = denominator.unsqueeze(-1) + self.eps
 
             retrieved = numerator / denominator  # [batch, heads, seq, head_dim]

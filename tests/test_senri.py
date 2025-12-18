@@ -55,13 +55,13 @@ class TestTensorMemory:
 
     def test_reset(self):
         memory = TensorMemory(num_heads=14, head_dim=64)
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
         assert memory.M.shape == (2, 14, 64, 64)
         assert memory.z.shape == (2, 14, 64)
 
     def test_update_and_retrieve(self):
         memory = TensorMemory(num_heads=14, head_dim=64)
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
 
         k = torch.randn(2, 14, 100, 64)
         v = torch.randn(2, 14, 100, 64)
@@ -95,7 +95,7 @@ class TestOrthogonalBasisMemory:
             hidden_size=896,
             top_k=64,
         )
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
         assert memory.M.shape == (2, 14, 896, 64, 64)
         assert memory.z.shape == (2, 14, 896, 64)
 
@@ -106,7 +106,7 @@ class TestOrthogonalBasisMemory:
             hidden_size=896,
             top_k=64,
         )
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
 
         k = torch.randn(2, 14, 100, 64)
         v = torch.randn(2, 14, 100, 64)
@@ -129,7 +129,7 @@ class TestSenriMemory:
             top_k=64,
         )
         memory.train()
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
 
         k = torch.randn(2, 14, 100, 64)
         v = torch.randn(2, 14, 100, 64)
@@ -148,7 +148,7 @@ class TestSenriMemory:
             top_k=64,
         )
         memory.eval()
-        memory.reset(batch_size=2, device=torch.device('cpu'), dtype=torch.float32)
+        memory.reset(batch_size=2, device=torch.device("cpu"), dtype=torch.float32)
 
         k = torch.randn(2, 14, 100, 64)
         v = torch.randn(2, 14, 100, 64)
