@@ -2,10 +2,10 @@
 Senri-LLM Colab Experiment Script
 
 Google Colabで実行するための統合スクリプト。
-学習、評価、分析を一つのスクリプトで実行可能。
+3段階学習、評価、分析を一つのスクリプトで実行可能。
 
 Usage:
-    # 学習
+    # 3段階学習（推奨）
     python scripts/colab.py train
 
     # 評価
@@ -17,7 +17,7 @@ Usage:
 Configuration:
     All settings are managed via config/*.yaml files.
     - config/model.yaml: Model architecture settings
-    - config/training.yaml: Training hyperparameters
+    - config/training.yaml: Training hyperparameters (including 3-stage config)
     - config/experiment.yaml: Experiment settings
 """
 
@@ -31,7 +31,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import ConfigManager
-from src.training import SenriTrainer
+from src.training import ThreeStageTrainer
 from src.data import load_training_dataset
 from src.utils import get_device
 
@@ -75,7 +75,6 @@ def test_model():
 
     from src.attention.senri_attention import SenriAttention
 
-    # Current simplified API: only needs hidden_size, num_attention_heads, num_key_value_heads
     attention = SenriAttention(
         hidden_size=config.hidden_size,
         num_attention_heads=config.num_attention_heads,
@@ -99,7 +98,7 @@ def test_model():
         output_eval, _, _ = attention(hidden_states)
     print(f"  Inference mode output shape: {output_eval.shape}")
 
-    # Verify output is not all zeros (memory should have values after update->retrieve)
+    # Verify output is not all zeros
     if output_eval.abs().sum() > 0:
         print("  Memory retrieval working (non-zero output)")
     else:
@@ -130,18 +129,15 @@ def test_memory():
     memory = TensorMemory(memory_dim=hidden_size)
     memory.reset(device, torch.float32)
 
-    # Shape: [batch, seq, memory_dim]
     k = torch.randn(batch_size, seq_len, hidden_size, device=device)
     v = torch.randn(batch_size, seq_len, hidden_size, device=device)
     q = torch.randn(batch_size, seq_len, hidden_size, device=device)
 
-    # Test update then retrieve
     memory.update(k, v)
     output = memory.retrieve(q)
     print(f"  Output shape: {output.shape}")
     assert output.shape == (batch_size, seq_len, hidden_size)
 
-    # Verify non-zero output
     if output.abs().sum() > 0:
         print("  Memory retrieval working (non-zero output)")
     else:
@@ -159,72 +155,76 @@ def test_memory():
     print("\nAll memory tests passed!")
 
 
-def convert_experiment():
-    """Convert base model to Senri."""
-    print("=" * 50)
-    print("Converting Base Model to Senri")
-    print("=" * 50)
-
-    from scripts.convert_to_senri import convert_to_senri, verify_conversion
-
-    config_manager = ConfigManager()
-    model_name = config_manager.base_model_name
-    output_dir = config_manager.output_dir
-
-    print(f"Loading {model_name} and Converting to Senri")
-
-    device = get_device()
-    device_str = "cuda" if device.type == "cuda" else "cpu"
-
-    senri_model = convert_to_senri(
-        model_name=model_name,
-        output_dir=output_dir,
-        device=device_str,
-    )
-
-    verify_conversion(senri_model, model_name, device_str)
-    return senri_model
-
-
 def train_experiment():
-    """Run training experiment using SenriTrainer."""
+    """
+    Run 3-stage training experiment.
+
+    Stage 1: Layer Distillation - メモリレイヤーの出力をベースモデルに近づける
+    Stage 2: Memory-only Fine-tuning - メモリレイヤーのみ学習
+    Stage 3: Full Fine-tuning - 全体を低学習率で調整
+    """
     print("=" * 50)
-    print("Training Experiment")
+    print("3-Stage Training Experiment")
     print("=" * 50)
 
     config_manager = ConfigManager()
     setup_environment(config_manager.seed)
 
-    # Create training config from config files
-    training_config = config_manager.to_training_config()
+    # Get 3-stage configs
+    stage1_config, stage2_config, stage3_config = (
+        config_manager.get_three_stage_config()
+    )
 
-    # Create trainer
-    trainer = SenriTrainer(training_config)
+    print("\nStage Configurations:")
+    print(
+        f"  Stage 1 (Distillation): lr={stage1_config.learning_rate}, epochs={stage1_config.num_epochs}"
+    )
+    print(
+        f"  Stage 2 (Memory-only): lr={stage2_config.learning_rate}, epochs={stage2_config.num_epochs}"
+    )
+    print(
+        f"  Stage 3 (Full fine-tune): lr={stage3_config.learning_rate}, epochs={stage3_config.num_epochs}"
+    )
 
-    # Setup model
-    print("\n[Step 1] Loading/Converting model...")
-    trainer.setup_model()
+    # Create 3-stage trainer
+    trainer = ThreeStageTrainer(
+        base_model_name=config_manager.base_model_name,
+        output_dir=config_manager.output_dir,
+        stage1_config=stage1_config,
+        stage2_config=stage2_config,
+        stage3_config=stage3_config,
+        max_length=config_manager.max_length,
+        seed=config_manager.seed,
+    )
 
-    # Load and prepare data
+    # Setup models
+    print("\n[Step 1] Setting up models...")
+    trainer.setup()
+
+    # Load training data
     print("\n[Step 2] Loading training data...")
     dataset = load_training_dataset(
         dataset_name=config_manager.dataset_name,
         dataset_config=config_manager.dataset_config,
-        niah_ratio=config_manager.niah_ratio,
+        niah_ratio=0.0,  # NIAH disabled for initial distillation
         max_train_samples=config_manager.max_train_samples,
         max_val_samples=config_manager.max_val_samples,
         seed=config_manager.seed,
     )
-    tokenized_dataset = trainer.setup_data(dataset)
 
-    # Train
-    print("\n[Step 3] Training...")
-    hf_trainer = trainer.train(tokenized_dataset)
+    # Run 3-stage training
+    print("\n[Step 3] Running 3-stage training...")
+    results = trainer.train(dataset)
 
-    # Optional: Copy to Google Drive (for Colab)
-    _save_to_drive(training_config.output_dir, config_manager)
+    print("\n" + "=" * 50)
+    print("Training Complete!")
+    print("=" * 50)
+    print(f"Results: {results}")
 
-    return hf_trainer
+    # Save to Google Drive if available
+    _save_to_drive(config_manager.output_dir, config_manager)
+
+    return results
 
 
 def _save_to_drive(output_dir: str, config_manager: ConfigManager):
@@ -292,7 +292,7 @@ def eval_experiment(model_path: str = None):
         tokenizer.pad_token = tokenizer.eos_token
 
     # Get evaluation settings from config
-    context_lengths = eval_config.get("context_lengths", [4096, 8192])
+    context_lengths = eval_config.get("context_lengths", [1024, 1536, 2048])
     seed = eval_config.get("seed", 42)
 
     results = {}
@@ -358,14 +358,12 @@ def main():
     """Main entry point."""
     import sys
 
-    # Simple command-line interface without argparse
-    # All configuration is managed via config/*.yaml files
     if len(sys.argv) < 2:
         experiment = "test"
     else:
         experiment = sys.argv[1]
 
-    valid_experiments = ["test", "test_memory", "convert", "train", "eval"]
+    valid_experiments = ["test", "test_memory", "train", "eval"]
     if experiment not in valid_experiments:
         print(f"Unknown experiment: {experiment}")
         print(f"Valid experiments: {valid_experiments}")
@@ -379,8 +377,6 @@ def main():
         test_model()
     elif experiment == "test_memory":
         test_memory()
-    elif experiment == "convert":
-        convert_experiment()
     elif experiment == "train":
         train_experiment()
     elif experiment == "eval":

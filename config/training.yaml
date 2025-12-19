@@ -1,61 +1,62 @@
-# Senri Training Configuration
-# 学習ハイパーパラメータの設定
+# Senri 3-Stage Training Configuration
 
 # Dataset settings
-# PG19 (Project Gutenberg books) for long-context training per HSA paper
 dataset:
   name: "pg19"
-  config: null  # Optional, for generic datasets only
-
-  # Context length must exceed SWA window (1024) to train memory
-  # 2048 tokens ensures memory is actively used during training
+  config: null
   max_length: 2048
-
-  # NIAH (Needle-in-a-Haystack) task injection
-  # HSA paper uses 1% injection ratio for long-context learning
-  niah_ratio: 0.01  # 0.0 to disable
-
-  # Sample limits (null for full dataset)
-  max_train_samples: 1000  # PG19 is large, limit for faster experiments
+  max_train_samples: 1000
   max_val_samples: 100
 
-# Training hyperparameters
-training:
-  num_epochs: 3
-  batch_size: 1  # Reduced for 2048 token context on L4/T4 GPU
-  gradient_accumulation_steps: 8  # Increased to maintain effective batch size
-  learning_rate: 5.0e-5
-  weight_decay: 0.01
-  warmup_ratio: 0.1
-  lr_scheduler_type: "cosine"
+# 3-Stage Training Configuration
+#
+# Stage 1: Distillation - メモリレイヤーの出力をベースレイヤーに近づける
+# Stage 2: Memory-only - メモリレイヤーのみ学習（他はフリーズ）
+# Stage 3: Full fine-tuning - 全体を低学習率で調整
 
-  # Differential learning rate for memory layers
-  # Set > 1.0 to train memory layers faster
-  memory_layer_lr_multiplier: 1.0
+three_stage:
+  # Stage 1: Layer Distillation
+  stage1:
+    enabled: true
+    num_epochs: 1
+    batch_size: 2
+    gradient_accumulation_steps: 4
+    learning_rate: 1.0e-4  # Higher LR for fast distillation
+    warmup_ratio: 0.1
+    max_train_samples: 500
+    max_val_samples: 50
 
-# Evaluation settings
-evaluation:
-  eval_steps: 100
-  save_steps: 500
-  save_total_limit: 3
-  logging_steps: 10
+  # Stage 2: Memory-only Fine-tuning
+  stage2:
+    enabled: true
+    num_epochs: 2
+    batch_size: 1
+    gradient_accumulation_steps: 8
+    learning_rate: 5.0e-5  # Medium LR
+    warmup_ratio: 0.1
+    niah_ratio: 0.01  # Enable NIAH for memory training
+    max_train_samples: 1000
+    max_val_samples: 100
 
-  # Early stopping
-  # Set to 0 to disable early stopping
-  early_stopping_patience: 2
-  early_stopping_threshold: 0.0  # Minimum improvement to reset patience
+  # Stage 3: Full Fine-tuning
+  stage3:
+    enabled: true
+    num_epochs: 1
+    batch_size: 1
+    gradient_accumulation_steps: 8
+    learning_rate: 1.0e-5  # Lower LR for fine adjustment
+    warmup_ratio: 0.05
+    niah_ratio: 0.01
+    max_train_samples: 1000
+    max_val_samples: 100
 
 # Memory optimization
 optimization:
   gradient_checkpointing: true
   fp16: true
-  max_grad_norm: 1.0  # Gradient clipping for stability
+  max_grad_norm: 1.0
 
 # Misc
 misc:
   seed: 42
   dataloader_num_workers: 2
-
-  # Fresh start: delete existing checkpoints and start training from scratch
-  # Set to true when code changes require retraining (e.g., bug fixes)
-  fresh_start: true

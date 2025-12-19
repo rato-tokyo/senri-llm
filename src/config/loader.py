@@ -16,7 +16,6 @@ def get_config_path(filename: str) -> Path:
     Returns:
         Path to the config file.
     """
-    # Try to find config directory relative to this file
     src_config_dir = Path(__file__).parent
     project_root = src_config_dir.parent.parent
     config_dir = project_root / "config"
@@ -32,15 +31,7 @@ def get_config_path(filename: str) -> Path:
 
 
 def load_config(filename: str) -> Dict[str, Any]:
-    """
-    Load a YAML config file.
-
-    Args:
-        filename: Config file name (e.g., "model.yaml")
-
-    Returns:
-        Dictionary containing the config.
-    """
+    """Load a YAML config file."""
     config_path = get_config_path(filename)
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -62,24 +53,13 @@ def load_experiment_config() -> Dict[str, Any]:
 
 
 class ConfigManager:
-    """
-    Unified configuration manager.
-
-    Loads and merges all config files into a single interface.
-    """
+    """Unified configuration manager for 3-stage training."""
 
     def __init__(self, config_override: Optional[Dict[str, Any]] = None):
-        """
-        Initialize ConfigManager.
-
-        Args:
-            config_override: Optional dict to override config values.
-        """
         self._model = load_model_config()
         self._training = load_training_config()
         self._experiment = load_experiment_config()
 
-        # Apply overrides if provided
         if config_override:
             self._apply_overrides(config_override)
 
@@ -116,7 +96,6 @@ class ConfigManager:
         """Get experiment config."""
         return self._experiment
 
-    # Convenience accessors for common values
     @property
     def base_model_name(self) -> str:
         """Get base model name."""
@@ -143,11 +122,6 @@ class ConfigManager:
         return self._training["dataset"]["max_length"]
 
     @property
-    def niah_ratio(self) -> float:
-        """Get NIAH task injection ratio."""
-        return self._training["dataset"].get("niah_ratio", 0.0)
-
-    @property
     def max_train_samples(self) -> Optional[int]:
         """Get max training samples."""
         return self._training["dataset"].get("max_train_samples")
@@ -158,100 +132,12 @@ class ConfigManager:
         return self._training["dataset"].get("max_val_samples")
 
     @property
-    def num_epochs(self) -> int:
-        """Get number of training epochs."""
-        return self._training["training"]["num_epochs"]
-
-    @property
-    def batch_size(self) -> int:
-        """Get training batch size."""
-        return self._training["training"]["batch_size"]
-
-    @property
-    def learning_rate(self) -> float:
-        """Get learning rate."""
-        return self._training["training"]["learning_rate"]
-
-    @property
-    def gradient_accumulation_steps(self) -> int:
-        """Get gradient accumulation steps."""
-        return self._training["training"]["gradient_accumulation_steps"]
-
-    @property
-    def gradient_checkpointing(self) -> bool:
-        """Get gradient checkpointing flag."""
-        return self._training["optimization"]["gradient_checkpointing"]
-
-    @property
-    def fp16(self) -> bool:
-        """Get fp16 flag."""
-        return self._training["optimization"]["fp16"]
-
-    @property
-    def max_grad_norm(self) -> float:
-        """Get max gradient norm for clipping."""
-        return self._training["optimization"].get("max_grad_norm", 1.0)
-
-    @property
     def seed(self) -> int:
         """Get random seed."""
         return self._training["misc"]["seed"]
 
-    @property
-    def fresh_start(self) -> bool:
-        """Get fresh_start flag (delete checkpoints and start from scratch)."""
-        return self._training["misc"].get("fresh_start", False)
-
-    def to_training_config(self):
-        """
-        Convert to TrainingConfig dataclass.
-
-        Returns:
-            TrainingConfig instance.
-        """
-        from ..training.config import TrainingConfig
-
-        return TrainingConfig(
-            model_name=self.base_model_name,
-            output_dir=self.output_dir,
-            dataset_name=self.dataset_name,
-            dataset_config=self.dataset_config,
-            max_length=self.max_length,
-            num_epochs=self.num_epochs,
-            batch_size=self.batch_size,
-            gradient_accumulation_steps=self.gradient_accumulation_steps,
-            learning_rate=self.learning_rate,
-            weight_decay=self._training["training"]["weight_decay"],
-            warmup_ratio=self._training["training"]["warmup_ratio"],
-            lr_scheduler_type=self._training["training"]["lr_scheduler_type"],
-            eval_steps=self._training["evaluation"]["eval_steps"],
-            save_steps=self._training["evaluation"]["save_steps"],
-            save_total_limit=self._training["evaluation"]["save_total_limit"],
-            logging_steps=self._training["evaluation"]["logging_steps"],
-            early_stopping_patience=self._training["evaluation"].get(
-                "early_stopping_patience", 2
-            ),
-            early_stopping_threshold=self._training["evaluation"].get(
-                "early_stopping_threshold", 0.0
-            ),
-            gradient_checkpointing=self.gradient_checkpointing,
-            fp16=self.fp16,
-            max_grad_norm=self.max_grad_norm,
-            seed=self.seed,
-            dataloader_num_workers=self._training["misc"]["dataloader_num_workers"],
-            fresh_start=self.fresh_start,
-            memory_layer_lr_multiplier=self._training["training"][
-                "memory_layer_lr_multiplier"
-            ],
-        )
-
     def to_senri_config(self):
-        """
-        Convert to SenriConfig.
-
-        Returns:
-            SenriConfig instance.
-        """
+        """Convert to SenriConfig."""
         from ..configuration_senri import SenriConfig
 
         return SenriConfig(
@@ -268,4 +154,41 @@ class ConfigManager:
             max_position_embeddings=self._model["position_encoding"][
                 "max_position_embeddings"
             ],
+        )
+
+    def get_three_stage_config(self):
+        """
+        Get 3-stage training configuration.
+
+        Returns:
+            Tuple of (stage1_config, stage2_config, stage3_config) as StageConfig instances.
+        """
+        from ..training.three_stage_trainer import StageConfig
+
+        three_stage = self._training.get("three_stage", {})
+        optimization = self._training.get("optimization", {})
+
+        def make_stage_config(stage_name: str) -> StageConfig:
+            stage = three_stage.get(stage_name, {})
+            return StageConfig(
+                enabled=stage.get("enabled", True),
+                num_epochs=stage.get("num_epochs", 1),
+                batch_size=stage.get("batch_size", 2),
+                gradient_accumulation_steps=stage.get("gradient_accumulation_steps", 4),
+                learning_rate=stage.get("learning_rate", 1e-4),
+                warmup_ratio=stage.get("warmup_ratio", 0.1),
+                weight_decay=self._training.get("training", {}).get(
+                    "weight_decay", 0.01
+                ),
+                max_grad_norm=optimization.get("max_grad_norm", 1.0),
+                fp16=optimization.get("fp16", True),
+                niah_ratio=stage.get("niah_ratio", 0.0),
+                max_train_samples=stage.get("max_train_samples", 500),
+                max_val_samples=stage.get("max_val_samples", 50),
+            )
+
+        return (
+            make_stage_config("stage1"),
+            make_stage_config("stage2"),
+            make_stage_config("stage3"),
         )

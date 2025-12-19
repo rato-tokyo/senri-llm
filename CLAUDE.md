@@ -4,74 +4,59 @@
 
 Senri-LLMは、**SmolLM-135M**をベースに、シンプルなテンソル積メモリを実装するプロジェクトです。
 
-**現在のステータス**: 最シンプル化版（new-llm準拠、メモリのみ、ローカルAttentionなし）
+**現在のステータス**: 3段階学習方式（蒸留→メモリ学習→全体調整）
 
-## 2024-12-19 シンプル化リファクタリング
+## 3段階学習アプローチ
 
-**NaN問題解決のため、new-llm準拠の最シンプル設計に変更しました。**
+### 問題背景
 
-### 変更前 vs 変更後
+線形Attentionレイヤーは、単純にSoftmax Attentionレイヤーと置換するだけでは機能しません。
+出力分布の違いがノイズとして後続レイヤーに伝播し、モデル全体の性能が劣化します。
 
-| 項目 | 変更前 | 変更後 |
-|------|--------|--------|
-| **メモリ形状** | `[batch, heads, d, d]` | `[d, d]`（バッチ共有） |
-| **ローカルAttention** | Softmax + RoPE | **なし** |
-| **セグメント処理** | forループ | **なし** |
-| **メモリゲート** | あり | **なし** |
-| **勾配** | 部分detach | **完全detach** |
-| **正規化** | `/seq_len` | **`/(batch*seq)`** |
+### 解決策: 3段階学習
 
-### ロールバック方法
+**Stage 1: Layer Distillation**
+- メモリレイヤーの出力をベースモデルのAttention出力に近づける
+- Loss: `MSE(memory_output, base_output.detach())`
+- 学習率: 高め (1e-4)
+
+**Stage 2: Memory-only Fine-tuning**
+- メモリレイヤー以外をフリーズ
+- 言語モデリング損失で学習
+- 学習率: 中程度 (5e-5)
+
+**Stage 3: Full Fine-tuning**
+- 全パラメータをアンフリーズ
+- 低学習率で全体を調整
+- 学習率: 低め (1e-5)
+
+### 使用方法
 
 ```bash
-git log --oneline  # コミットハッシュを確認
-git checkout <hash-before-simplification> -- src/
+# 3段階学習を実行
+python scripts/colab.py train
+
+# 評価
+python scripts/colab.py eval
+
+# 動作確認
+python scripts/colab.py test
 ```
 
 ## Architecture Specification
 
-### Core Concept（最シンプル版）
+### Core Concept
 
 ```
 入力 → QKV投影 → メモリ更新 → メモリ検索 → 出力投影
 ```
 
 **特徴**:
-- ローカルAttentionなし（メモリのみ）
+- メモリレイヤーではローカルAttentionなし（メモリのみ）
 - 位置エンコーディングなし（NoPE）
 - バッチ共有メモリ `[d, d]`
 - 完全detach（安定性優先）
-- **update → retrieve 順序**（現在のトークンも出力に貢献）
-
-### Why Memory-Only (No Local Attention)
-
-**線形AttentionとテンソルメモリはNoPEにおいて数学的に等価です。**
-
-```
-# 線形Attention
-output = φ(Q) @ (φ(K)^T @ V)
-
-# テンソル積メモリ
-M = M + φ(K)^T @ V    # 更新
-output = φ(Q) @ M      # 検索
-```
-
-両者とも `φ(K)^T @ V`（外積の累積）という同一の操作を行います。
-
-**参考文献**:
-- [Linear Transformers Are Secretly Fast Weight Programmers](https://arxiv.org/pdf/2102.11174) - 線形Attentionと外積連想記憶の数学的等価性を証明
-- [Infini-attention](https://arxiv.org/abs/2404.07143) - Google DeepMindによる線形Attention＋圧縮メモリ
-
-**NoPE（位置エンコーディングなし）の場合**:
-- ローカルAttentionとメモリの区別が不要
-- 同じ外積累積操作を2回行う意味がない
-- メモリのみで十分（シンプルかつ効率的）
-
-**RoPEを使う場合のみ分離が意味を持つ**:
-- ローカル: RoPE適用（位置情報あり）
-- メモリ: RoPEなし（位置に依存しない長期記憶）
-
-現在のsenri-llmはNoPE設計のため、メモリのみの実装が理論的に正しい選択です。
+- **update → retrieve 順序**
 
 ### Base Model: SmolLM-135M
 
@@ -102,66 +87,13 @@ Layer 21-29: Standard Attention (RoPE)
 - `memory_layer_interval`: 10
 - メモリレイヤーのインデックス: [10, 20]
 
-## Implementation Details
-
-### TensorMemory（バッチ共有、シングル）
+## Key Classes
 
 ```python
-# メモリ構造
-M = torch.zeros(memory_dim, memory_dim)  # バッチ共有
-z = torch.zeros(memory_dim)              # 正規化係数
+# src/training/three_stage_trainer.py
+class ThreeStageTrainer:
+    """3段階学習を実行するトレーナー"""
 
-# 更新: M = M + σ(K)^T @ V / (batch * seq)
-sigma_keys = elu_plus_one(keys)
-delta_M = torch.einsum("bsd,bse->de", sigma_keys, values)
-delta_M = delta_M / (batch_size * seq_len)
-M = (M + delta_M).detach()  # 完全detach
-
-# 検索: output = (σ(Q) @ M) / (σ(Q) @ z)
-sigma_queries = elu_plus_one(queries)
-numerator = torch.matmul(sigma_queries, M)
-denominator = torch.matmul(sigma_queries, z).clamp(min=eps)
-output = numerator / denominator.unsqueeze(-1)
-```
-
-### SenriAttention（メモリのみ、GQA対応）
-
-```python
-class SenriAttention(nn.Module):
-    def __init__(self, hidden_size, num_attention_heads, num_key_value_heads, eps=1e-6, layer_idx=0):
-        self.head_dim = hidden_size // num_attention_heads
-        self.num_key_value_groups = num_attention_heads // num_key_value_heads
-
-        # GQA projections (SmolLMと同じ構造)
-        self.q_proj = nn.Linear(hidden_size, num_attention_heads * self.head_dim, bias=True)
-        self.k_proj = nn.Linear(hidden_size, num_key_value_heads * self.head_dim, bias=True)
-        self.v_proj = nn.Linear(hidden_size, num_key_value_heads * self.head_dim, bias=True)
-        self.o_proj = nn.Linear(num_attention_heads * self.head_dim, hidden_size, bias=False)
-        self.memory = TensorMemory(memory_dim=hidden_size, eps=eps)
-
-    def forward(self, hidden_states, ...):
-        q = self.q_proj(hidden_states)
-        k = self.k_proj(hidden_states)
-        v = self.v_proj(hidden_states)
-
-        # KVをQに合わせて展開
-        k = self._repeat_kv(k, self.num_key_value_groups)
-        v = self._repeat_kv(v, self.num_key_value_groups)
-
-        # メモリ初期化（未初期化の場合のみ）
-        if self.memory.M is None:
-            self.memory.reset(device, dtype)
-
-        # update → retrieve 順序（現在のトークンも出力に貢献）
-        self.memory.update(k, v)
-        output = self.memory.retrieve(q)
-
-        return self.o_proj(output), None, None
-```
-
-### Key Classes
-
-```python
 # src/memory/base_memory.py
 class TensorMemory:
     """バッチ共有テンソル積メモリ [d, d]"""
@@ -172,92 +104,46 @@ class SenriAttention:
 
 # src/configuration_senri.py
 class SenriConfig(LlamaConfig):
-    num_memory_layers: int = 2
-    first_memory_layer: int = 10
-    memory_layer_interval: int = 10
-    memory_eps: float = 1e-6
-```
-
-## new-llmとの対応
-
-本シンプル化はnew-llmプロジェクトの設計を参考にしています。
-
-| new-llm | senri-llm (現在) |
-|---------|------------------|
-| `CompressiveMemory` | `TensorMemory` |
-| `SenriAttention` (layers/senri.py) | `SenriAttention` |
-| `causal_linear_attention` | **なし**（メモリのみ） |
-| バッチ共有 `[d, d]` | バッチ共有 `[d, d]` |
-| 完全detach | 完全detach |
-| `/(batch*seq)` | `/(batch*seq)` |
-
-## Memory Lifecycle (メモリ管理)
-
-### 状態プロパティ
-
-```python
-memory = TensorMemory(memory_dim=576)
-memory.is_initialized  # False - まだ初期化されていない
-memory.is_empty        # True  - 中身がない
-
-memory.reset(device, dtype)
-memory.is_initialized  # True  - 初期化済み
-memory.is_empty        # True  - まだ中身なし
-
-memory.update(k, v)
-memory.is_empty        # False - 中身あり
-```
-
-### メモリリセットの責任
-
-| コンポーネント | 責任 |
-|---------------|------|
-| `TensorMemory` | `reset()`, `update()`, `retrieve()` の実装 |
-| `SenriAttention` | 未初期化時の lazy init のみ |
-| `SenriForCausalLM` | シーケンス開始時のリセット（自動 or `new_sequence()`） |
-
-### Context Manager API（推奨）
-
-```python
-# 明示的なシーケンス境界
-with model.new_sequence():
-    output = model(input_ids)
-    # or
-    output = model.generate(input_ids, ...)
-
-# 複数シーケンスを独立に処理
-for batch in dataloader:
-    with model.new_sequence():
-        output = model(batch)
-```
-
-### 自動リセット（従来互換）
-
-```python
-# past_key_values が None の場合、自動でリセットされる
-output = model(input_ids)  # 自動リセット
-output = model.generate(input_ids, ...)  # 自動リセット
-```
-
-### メモリの流れ
-
-```
-1. forward() 開始
-2. past_key_values is None? → リセット
-3. 各レイヤーで:
-   - SenriAttention: update → retrieve（蓄積）
-   - StandardAttention: 通常の処理
-4. 次のforward()へ（generate時は蓄積継続）
+    """Senriモデル設定"""
 ```
 
 ## Configuration Management
 
-設定は `config/*.yaml` で管理。スクリプトへの引数追加は禁止。
+設定は `config/*.yaml` で管理。
 
-```bash
-python scripts/colab.py train
-python scripts/colab.py test
-python scripts/colab.py eval
+```yaml
+# config/training.yaml
+three_stage:
+  stage1:
+    enabled: true
+    num_epochs: 1
+    learning_rate: 1.0e-4
+  stage2:
+    enabled: true
+    num_epochs: 2
+    learning_rate: 5.0e-5
+  stage3:
+    enabled: true
+    num_epochs: 1
+    learning_rate: 1.0e-5
+```
+
+## Memory Lifecycle
+
+### Context Manager API（推奨）
+
+```python
+with model.new_sequence():
+    output = model(input_ids)
+    # or
+    output = model.generate(input_ids, ...)
+```
+
+### 自動リセット
+
+```python
+# past_key_values が None の場合、自動でリセット
+output = model(input_ids)
 ```
 
 ## Dependencies
@@ -267,42 +153,32 @@ torch>=2.0.0
 transformers>=4.36.0
 accelerate>=0.25.0
 datasets>=2.14.0
+tqdm
 ```
 
-## Common Pitfalls
+## Project Structure
 
-### 1. SenriAttention内でリセットしない
-
-```python
-# Bad - 毎forward()でリセットすると常にゼロ出力
-def forward(...):
-    self.memory.reset(...)  # NG!
-
-# Good - 初期化のみ（is_initialized使用）
-def forward(...):
-    if not self.memory.is_initialized:
-        self.memory.reset(...)
 ```
-
-### 2. update → retrieve 順序
-
-```python
-# 正しい順序
-self.memory.update(k, v)          # まず更新
-output = self.memory.retrieve(q)  # その後検索
-# 現在のトークンも出力に貢献する
-
-# 逆順だと空メモリから検索 → ゼロ出力
-```
-
-### 3. 明示的なシーケンス境界を使う
-
-```python
-# 推奨: context manager で意図を明確に
-with model.new_sequence():
-    output = model(input_ids)
-
-# 自動リセットに依存しない方が安全
+senri-llm/
+├── config/
+│   ├── model.yaml          # モデルアーキテクチャ
+│   ├── training.yaml       # 3段階学習設定
+│   └── experiment.yaml     # 実験設定
+├── scripts/
+│   ├── colab.py            # メイン実行スクリプト
+│   ├── convert_to_senri.py # モデル変換
+│   └── poc_memory.py       # PoCテスト
+├── src/
+│   ├── training/
+│   │   └── three_stage_trainer.py  # 3段階トレーナー
+│   ├── memory/
+│   │   └── base_memory.py  # TensorMemory
+│   ├── attention/
+│   │   └── senri_attention.py  # SenriAttention
+│   ├── modeling_senri.py   # SenriForCausalLM
+│   └── configuration_senri.py  # SenriConfig
+└── docs/
+    └── findings-memory-layer-integration.md  # 知見
 ```
 
 ## Experiment Environment

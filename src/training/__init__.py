@@ -1,6 +1,5 @@
 """Training utilities for Senri-LLM."""
 
-from .trainer import SenriTrainer
-from .config import TrainingConfig
+from .three_stage_trainer import ThreeStageTrainer, StageConfig
 
-__all__ = ["SenriTrainer", "TrainingConfig"]
+__all__ = ["ThreeStageTrainer", "StageConfig"]
