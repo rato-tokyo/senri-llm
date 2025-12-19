@@ -269,12 +269,21 @@ class ThreeStageTrainer:
 
                 # Calculate distillation loss for each memory layer
                 # Hidden states are indexed as: [embed, layer0, layer1, ..., layerN, final_norm]
+                # We use cosine similarity loss instead of MSE to handle scale differences
+                # caused by L2 normalization in memory attention
                 loss = torch.tensor(0.0, device=self.device)
                 for layer_idx in memory_indices:
                     # +1 because index 0 is embedding output
                     base_output = base_hidden_states[layer_idx + 1].detach()
                     senri_output = senri_hidden_states[layer_idx + 1]
-                    loss = loss + mse_loss(senri_output, base_output)
+
+                    # Normalize both outputs to compare direction, not magnitude
+                    base_norm = torch.nn.functional.normalize(base_output, p=2, dim=-1)
+                    senri_norm = torch.nn.functional.normalize(senri_output, p=2, dim=-1)
+
+                    # Cosine similarity loss: 1 - cos_sim (range: 0 to 2)
+                    cos_sim = (base_norm * senri_norm).sum(dim=-1).mean()
+                    loss = loss + (1 - cos_sim)
 
                 loss = loss / len(memory_indices)  # Average over layers
 
