@@ -69,12 +69,10 @@ class TensorMemory(nn.Module):
 
     @property
     def is_empty(self) -> bool:
-        """Check if memory is in initial state (identity matrix)."""
+        """Check if memory is empty (all zeros)."""
         if not self.is_initialized:
             return True
-        # Check if M is close to identity matrix
-        identity = torch.eye(self.memory_dim, device=self.M.device, dtype=self.M.dtype)
-        return bool((self.M - identity).abs().max() < self.eps)
+        return bool(self.z.abs().sum() < self.eps)
 
     def reset(
         self,
@@ -88,15 +86,15 @@ class TensorMemory(nn.Module):
             device: Device for tensors.
             dtype: Data type for tensors.
         """
-        # M: [memory_dim, memory_dim] - initialize as identity matrix
-        # This ensures retrieve(Q) ≈ Q when memory is fresh (identity mapping)
-        self.M = torch.eye(
+        # M: [memory_dim, memory_dim] - initialize as zeros
+        self.M = torch.zeros(
+            self.memory_dim,
             self.memory_dim,
             device=device,
             dtype=dtype,
         )
-        # z: [memory_dim] - initialize as ones for proper normalization
-        self.z = torch.ones(self.memory_dim, device=device, dtype=dtype)
+        # z: [memory_dim] - initialize as zeros
+        self.z = torch.zeros(self.memory_dim, device=device, dtype=dtype)
 
     def _validate_input(self, tensor: torch.Tensor, name: str):
         """Validate input tensor shape."""
