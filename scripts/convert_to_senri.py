@@ -48,11 +48,7 @@ ATTENTION_WEIGHT_COMPONENTS = [
     "self_attn.o_proj.weight",
 ]
 
-ATTENTION_BIAS_COMPONENTS = [
-    "self_attn.q_proj.bias",
-    "self_attn.k_proj.bias",
-    "self_attn.v_proj.bias",
-]
+# Note: SmolLM does not use attention biases, so we don't need to copy them
 
 
 def _determine_memory_layer_config(num_layers: int) -> tuple:
@@ -161,12 +157,6 @@ def convert_layer_weights(
     for component in all_components:
         key = f"{prefix}.{component}"
         converted[key] = base_state_dict[key]
-
-    # Handle optional biases (SmolLM has attention biases for Q, K, V)
-    for component in ATTENTION_BIAS_COMPONENTS:
-        key = f"{prefix}.{component}"
-        if key in base_state_dict:
-            converted[key] = base_state_dict[key]
 
     return converted
 

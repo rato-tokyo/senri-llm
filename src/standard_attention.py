@@ -28,13 +28,13 @@ class SenriStandardAttention(nn.Module):
         self.rope_theta = config.rope_theta
 
         self.q_proj = nn.Linear(
-            self.hidden_size, self.num_heads * self.head_dim, bias=True
+            self.hidden_size, self.num_heads * self.head_dim, bias=False
         )
         self.k_proj = nn.Linear(
-            self.hidden_size, self.num_kv_heads * self.head_dim, bias=True
+            self.hidden_size, self.num_kv_heads * self.head_dim, bias=False
         )
         self.v_proj = nn.Linear(
-            self.hidden_size, self.num_kv_heads * self.head_dim, bias=True
+            self.hidden_size, self.num_kv_heads * self.head_dim, bias=False
         )
         self.o_proj = nn.Linear(
             self.num_heads * self.head_dim, self.hidden_size, bias=False

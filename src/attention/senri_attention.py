@@ -54,15 +54,15 @@ class SenriAttention(nn.Module):
         self.layer_idx = layer_idx
         self.eps = eps
 
-        # Projections (GQA compatible - same as SmolLM)
+        # Projections (GQA compatible - same as SmolLM, no bias)
         self.q_proj = nn.Linear(
-            hidden_size, num_attention_heads * self.head_dim, bias=True
+            hidden_size, num_attention_heads * self.head_dim, bias=False
         )
         self.k_proj = nn.Linear(
-            hidden_size, num_key_value_heads * self.head_dim, bias=True
+            hidden_size, num_key_value_heads * self.head_dim, bias=False
         )
         self.v_proj = nn.Linear(
-            hidden_size, num_key_value_heads * self.head_dim, bias=True
+            hidden_size, num_key_value_heads * self.head_dim, bias=False
         )
         self.o_proj = nn.Linear(
             num_attention_heads * self.head_dim, hidden_size, bias=False
