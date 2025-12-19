@@ -18,7 +18,7 @@ from .modules import SenriRMSNorm
 from .decoder import SenriDecoderLayer
 
 
-class SenriPreTrainedModel(PreTrainedModel, GenerationMixin):  # type: ignore[misc]
+class SenriPreTrainedModel(PreTrainedModel):
     """Base class for Senri models."""
 
     config_class = SenriConfig  # type: ignore[assignment]
@@ -209,7 +209,7 @@ class SenriModel(SenriPreTrainedModel):
         return mask
 
 
-class SenriForCausalLM(SenriPreTrainedModel):
+class SenriForCausalLM(SenriPreTrainedModel, GenerationMixin):  # type: ignore[misc]
     """Senri model with LM head for causal language modeling."""
 
     _tied_weights_keys = ["lm_head.weight"]  # type: ignore[assignment]

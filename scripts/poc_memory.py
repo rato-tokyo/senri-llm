@@ -20,7 +20,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
 from src.configuration_senri import SenriConfig
@@ -57,6 +56,7 @@ TRAIN_CONFIG = {
 # =============================================================================
 # Dataset: Key-Value Memory Test
 # =============================================================================
+
 
 class KeyValueDataset(Dataset):
     """
@@ -99,7 +99,7 @@ class KeyValueDataset(Dataset):
 
             # 中間: ランダムなfiller（20-100の範囲）
             filler_len = self.seq_len - 5
-            seq[2:2+filler_len] = torch.randint(20, 100, (filler_len,))
+            seq[2 : 2 + filler_len] = torch.randint(20, 100, (filler_len,))
 
             # 終了: QUERY + key_id + VALUE（ラベル用）
             query_pos = self.seq_len - 3
@@ -111,12 +111,14 @@ class KeyValueDataset(Dataset):
             labels = seq.clone()
             labels[:-1] = -100  # 最後以外は無視
 
-            data.append({
-                "input_ids": seq,
-                "labels": labels,
-                "key_id": key_id,
-                "value_id": value_id,
-            })
+            data.append(
+                {
+                    "input_ids": seq,
+                    "labels": labels,
+                    "key_id": key_id,
+                    "value_id": value_id,
+                }
+            )
 
         return data
 
@@ -138,6 +140,7 @@ def collate_fn(batch):
 # =============================================================================
 # Training
 # =============================================================================
+
 
 def train_model(model, dataloader, num_epochs, lr, device):
     """シンプルな学習ループ"""
@@ -166,7 +169,7 @@ def train_model(model, dataloader, num_epochs, lr, device):
 
         avg_loss = total_loss / len(dataloader)
         if (epoch + 1) % 10 == 0 or epoch == 0:
-            print(f"  Epoch {epoch+1:3d}: loss = {avg_loss:.4f}")
+            print(f"  Epoch {epoch + 1:3d}: loss = {avg_loss:.4f}")
 
     print("-" * 40)
     return model
@@ -175,6 +178,7 @@ def train_model(model, dataloader, num_epochs, lr, device):
 # =============================================================================
 # Evaluation
 # =============================================================================
+
 
 def evaluate_memory(model, dataset, device):
     """メモリが機能しているか評価"""
@@ -210,7 +214,9 @@ def evaluate_memory(model, dataset, device):
 
         if i < 5:  # 最初の5つを表示
             status = "✓" if is_correct else "✗"
-            print(f"  {status} Key={key_id}, Expected={expected_value}, Predicted={predicted}")
+            print(
+                f"  {status} Key={key_id}, Expected={expected_value}, Predicted={predicted}"
+            )
 
     accuracy = correct / total * 100
     print("-" * 40)
@@ -229,7 +235,7 @@ def test_memory_accumulation(model, device):
     # メモリレイヤーを取得
     memory_layer = None
     for layer in model.model.layers:
-        if hasattr(layer.self_attn, 'memory'):
+        if hasattr(layer.self_attn, "memory"):
             memory_layer = layer.self_attn
             break
 
@@ -245,7 +251,7 @@ def test_memory_accumulation(model, device):
             # 最初のforward
             model(input_ids=input_ids[:, :16])
             M_after_first = memory_layer.memory.M.clone()
-            z_after_first = memory_layer.memory.z.clone()
+            memory_layer.memory.z.clone()
 
             # 2回目のforward（リセットなし）
             model(input_ids=input_ids[:, 16:], past_key_values=None)
@@ -271,6 +277,7 @@ def test_memory_accumulation(model, device):
 # =============================================================================
 # Main
 # =============================================================================
+
 
 def main():
     print("=" * 60)
