@@ -78,8 +78,10 @@ def main():
     layer_inputs = {}
 
     def make_attn_hook(name):
-        def hook(module, input, output):
-            layer_inputs[name] = input[0].detach()  # hidden_states input
+        def hook(module, args, output):
+            # args is a tuple of positional arguments
+            if len(args) > 0:
+                layer_inputs[name] = args[0].detach()  # hidden_states input
             if isinstance(output, tuple):
                 attention_outputs[name] = output[0].detach()
             else:
