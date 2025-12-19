@@ -120,11 +120,13 @@ class SenriAttention(nn.Module):
         keys = self._repeat_kv(keys, self.num_key_value_groups)
         values = self._repeat_kv(values, self.num_key_value_groups)
 
-        # L2 normalize keys and values to prevent numerical explosion in memory
-        # This is critical for stability when computing outer products
-        keys = F.normalize(keys, p=2, dim=-1)
-        values = F.normalize(values, p=2, dim=-1)
-        queries = F.normalize(queries, p=2, dim=-1)
+        # Scale down keys/values to prevent numerical explosion in memory
+        # Instead of L2 normalization (which destroys magnitude info), use simple scaling
+        # This preserves relative magnitudes while preventing overflow
+        scale = 1.0 / (self.hidden_size ** 0.5)  # Similar to attention scaling
+        keys = keys * scale
+        values = values * scale
+        queries = queries * scale
 
         # Memory lifecycle:
         # - Initialization: happens here on first forward (lazy init)
