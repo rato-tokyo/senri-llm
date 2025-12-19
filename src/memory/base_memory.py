@@ -191,11 +191,12 @@ class TensorMemory(nn.Module):
         self._validate_input(queries, "queries")
 
         if self.M is None or self.z is None:
-            return torch.zeros_like(queries)
+            return queries
 
-        # Check if memory is empty
+        # Check if memory is empty - return queries as fallback
+        # This preserves information flow when memory hasn't accumulated enough
         if self.z.abs().sum() < self.eps:
-            return torch.zeros_like(queries)
+            return queries
 
         # Apply ELU+1 activation to queries
         sigma_queries = elu_plus_one(queries)
@@ -211,13 +212,13 @@ class TensorMemory(nn.Module):
 
         output = numerator / denominator
 
-        # NaN/Inf safety check - return zeros if output is invalid
+        # NaN/Inf safety check - return queries as fallback if output is invalid
         if torch.isnan(output).any() or torch.isinf(output).any():
             logger.warning(
-                "NaN/Inf detected in memory retrieve output, returning zeros. "
+                "NaN/Inf detected in memory retrieve output, returning queries. "
                 f"numerator stats: min={numerator.min():.4f}, max={numerator.max():.4f}, "
                 f"denominator stats: min={denominator.min():.4f}, max={denominator.max():.4f}"
             )
-            return torch.zeros_like(queries)
+            return queries
 
         return output
