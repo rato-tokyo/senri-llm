@@ -1,14 +1,10 @@
-"""Three-stage training for Senri memory layer integration.
+"""Two-stage training for Senri memory layer integration.
 
-Stage 1: Layer Distillation
-    - Train memory layer outputs to match base model attention outputs
-    - Loss: MSE(memory_output, base_output.detach())
-
-Stage 2: Memory-only Fine-tuning
+Stage 1: Memory-only Fine-tuning
     - Freeze all parameters except memory layers
     - Train with language modeling loss
 
-Stage 3: Full Fine-tuning
+Stage 2: Full Fine-tuning
     - Unfreeze all parameters
     - Train with low learning rate for coordination
 """
@@ -18,16 +14,13 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import torch
-from torch.utils.data import DataLoader
 from transformers import (
-    AutoModelForCausalLM,
     AutoTokenizer,
     DataCollatorForLanguageModeling,
     PreTrainedTokenizerBase,
     Trainer,
     TrainingArguments,
 )
-from tqdm import tqdm
 
 from ..modeling_senri import SenriForCausalLM
 from ..utils import get_device, clear_memory
@@ -51,8 +44,8 @@ class StageConfig:
     max_val_samples: int = 50
 
 
-class ThreeStageTrainer:
-    """Orchestrates 3-stage training for Senri model."""
+class TwoStageTrainer:
+    """Orchestrates 2-stage training for Senri model."""
 
     def __init__(
         self,
@@ -60,7 +53,6 @@ class ThreeStageTrainer:
         output_dir: str = "./outputs",
         stage1_config: Optional[StageConfig] = None,
         stage2_config: Optional[StageConfig] = None,
-        stage3_config: Optional[StageConfig] = None,
         max_length: int = 2048,
         seed: int = 42,
     ):
@@ -71,14 +63,13 @@ class ThreeStageTrainer:
         self.device = get_device()
 
         # Stage configs
-        self.stage1_config = stage1_config or StageConfig()
-        self.stage2_config = stage2_config or StageConfig(
+        self.stage1_config = stage1_config or StageConfig(
             learning_rate=5e-5,
             num_epochs=2,
             batch_size=1,
             gradient_accumulation_steps=8,
         )
-        self.stage3_config = stage3_config or StageConfig(
+        self.stage2_config = stage2_config or StageConfig(
             learning_rate=1e-5,
             num_epochs=1,
             batch_size=1,
@@ -86,7 +77,6 @@ class ThreeStageTrainer:
         )
 
         # Will be initialized
-        self.base_model: Optional[AutoModelForCausalLM] = None
         self.senri_model: Optional[SenriForCausalLM] = None
         self.tokenizer: Optional[PreTrainedTokenizerBase] = None
 
@@ -114,16 +104,6 @@ class ThreeStageTrainer:
                 device="cpu",
             )
 
-        # Load base model for distillation
-        print(f"Loading base model for distillation: {self.base_model_name}")
-        self.base_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name,
-            torch_dtype=torch.float32,
-        )
-        self.base_model.eval()
-        for param in self.base_model.parameters():
-            param.requires_grad = False
-
         # Load tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name)
         if self.tokenizer.pad_token is None:
@@ -131,9 +111,8 @@ class ThreeStageTrainer:
 
         # Move to device
         self.senri_model = self.senri_model.to(self.device)
-        self.base_model = self.base_model.to(self.device)
 
-        print(f"Models loaded on {self.device}")
+        print(f"Model loaded on {self.device}")
         assert self.senri_model is not None
         print(f"Memory layers: {self.senri_model.config.get_memory_layer_indices()}")
         clear_memory()
@@ -171,162 +150,28 @@ class ThreeStageTrainer:
             param.requires_grad = True
         print("  All parameters unfrozen")
 
-    def _create_dataloader(
-        self,
-        tokenized_dataset,
-        batch_size: int,
-        shuffle: bool = True,
-    ) -> DataLoader:
-        """Create a DataLoader for training."""
-        assert self.tokenizer is not None
-        data_collator = DataCollatorForLanguageModeling(
-            tokenizer=self.tokenizer,
-            mlm=False,
-        )
-
-        return DataLoader(
-            tokenized_dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            collate_fn=data_collator,
-            num_workers=0,  # Avoid multiprocessing issues
-        )
-
-    def train_stage1_distillation(self, tokenized_dataset) -> Dict:
+    def train_stage1_memory_only(self, tokenized_dataset) -> Dict:
         """
-        Stage 1: Layer Distillation.
+        Stage 1: Memory-only Fine-tuning.
 
-        Train memory layer outputs to match base model attention outputs.
+        Freeze all except memory layers and train with LM loss.
         """
         if not self.stage1_config.enabled:
             print("Stage 1 is disabled, skipping...")
             return {}
 
         print("\n" + "=" * 60)
-        print("STAGE 1: Layer Distillation")
+        print("STAGE 1: Memory-only Fine-tuning")
         print("=" * 60)
 
         config = self.stage1_config
-        memory_indices = self._get_memory_layer_indices()
-        print(f"Memory layers to distill: {memory_indices}")
-
-        # Freeze everything except memory layer attention components
-        self._freeze_all_except_memory_layers()
-
-        # Create dataloader
-        dataloader = self._create_dataloader(
-            tokenized_dataset["train"].select(
-                range(min(config.max_train_samples, len(tokenized_dataset["train"])))
-            ),
-            batch_size=config.batch_size,
-        )
-
-        # Optimizer for memory layers only
-        assert self.senri_model is not None
-        memory_params = [
-            p for n, p in self.senri_model.named_parameters() if p.requires_grad
-        ]
-        optimizer = torch.optim.AdamW(
-            memory_params,
-            lr=config.learning_rate,
-            weight_decay=config.weight_decay,
-        )
-
-        total_loss = 0.0
-        num_steps = 0
-        assert self.senri_model is not None
-        self.senri_model.train()
-
-        for epoch in range(config.num_epochs):
-            epoch_loss = 0.0
-            progress_bar = tqdm(dataloader, desc=f"Stage 1 Epoch {epoch + 1}")
-
-            for batch_idx, batch in enumerate(progress_bar):
-                input_ids = batch["input_ids"].to(self.device)
-                attention_mask = batch["attention_mask"].to(self.device)
-
-                # Get base model hidden states at memory layer positions
-                assert self.base_model is not None
-                with torch.no_grad():
-                    base_outputs = self.base_model(  # type: ignore[operator]
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        output_hidden_states=True,
-                    )
-                    base_hidden_states = base_outputs.hidden_states
-
-                # Get Senri model hidden states
-                senri_outputs = self.senri_model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                )
-                senri_hidden_states = senri_outputs.hidden_states
-
-                # Calculate distillation loss for each memory layer
-                # Hidden states are indexed as: [embed, layer0, layer1, ..., layerN, final_norm]
-                # We use MSE loss to match output distributions
-                loss = torch.tensor(0.0, device=self.device)
-                for layer_idx in memory_indices:
-                    # +1 because index 0 is embedding output
-                    base_output = base_hidden_states[layer_idx + 1].detach()
-                    senri_output = senri_hidden_states[layer_idx + 1]
-
-                    # MSE loss to match outputs
-                    layer_loss = torch.nn.functional.mse_loss(senri_output, base_output)
-                    loss = loss + layer_loss
-
-                loss = loss / len(memory_indices)  # Average over layers
-
-                # Backward
-                loss.backward()
-
-                if (batch_idx + 1) % config.gradient_accumulation_steps == 0:
-                    torch.nn.utils.clip_grad_norm_(memory_params, config.max_grad_norm)
-                    optimizer.step()
-                    optimizer.zero_grad()
-
-                epoch_loss += loss.item()
-                num_steps += 1
-                progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
-
-            avg_epoch_loss = epoch_loss / len(dataloader)
-            print(f"  Epoch {epoch + 1} - Average Loss: {avg_epoch_loss:.4f}")
-            total_loss += avg_epoch_loss
-
-        # Save distilled model
-        assert self.senri_model is not None
-        assert self.tokenizer is not None
-        stage1_path = self.output_dir / "stage1-distilled"
-        self.senri_model.save_pretrained(stage1_path)
-        self.tokenizer.save_pretrained(stage1_path)
-        print(f"Stage 1 model saved to: {stage1_path}")
-
-        clear_memory()
-        return {"stage1_loss": total_loss / config.num_epochs}
-
-    def train_stage2_memory_only(self, tokenized_dataset) -> Dict:
-        """
-        Stage 2: Memory-only Fine-tuning.
-
-        Freeze all except memory layers and train with LM loss.
-        """
-        if not self.stage2_config.enabled:
-            print("Stage 2 is disabled, skipping...")
-            return {}
-
-        print("\n" + "=" * 60)
-        print("STAGE 2: Memory-only Fine-tuning")
-        print("=" * 60)
-
-        config = self.stage2_config
 
         # Freeze everything except memory layers
         self._freeze_all_except_memory_layers()
 
         # Create training arguments
         training_args = TrainingArguments(
-            output_dir=str(self.output_dir / "stage2-training"),
+            output_dir=str(self.output_dir / "stage1-training"),
             num_train_epochs=config.num_epochs,
             per_device_train_batch_size=config.batch_size,
             per_device_eval_batch_size=config.batch_size,
@@ -380,36 +225,36 @@ class ThreeStageTrainer:
         train_result = trainer.train()
 
         # Save
-        stage2_path = self.output_dir / "stage2-memory-trained"
-        trainer.save_model(str(stage2_path))
-        self.tokenizer.save_pretrained(stage2_path)
-        print(f"Stage 2 model saved to: {stage2_path}")
+        stage1_path = self.output_dir / "stage1-memory-trained"
+        trainer.save_model(str(stage1_path))
+        self.tokenizer.save_pretrained(stage1_path)
+        print(f"Stage 1 model saved to: {stage1_path}")
 
         clear_memory()
-        return {"stage2_loss": train_result.metrics.get("train_loss", 0)}
+        return {"stage1_loss": train_result.metrics.get("train_loss", 0)}
 
-    def train_stage3_full_finetune(self, tokenized_dataset) -> Dict:
+    def train_stage2_full_finetune(self, tokenized_dataset) -> Dict:
         """
-        Stage 3: Full Fine-tuning.
+        Stage 2: Full Fine-tuning.
 
         Unfreeze all parameters and train with low learning rate.
         """
-        if not self.stage3_config.enabled:
-            print("Stage 3 is disabled, skipping...")
+        if not self.stage2_config.enabled:
+            print("Stage 2 is disabled, skipping...")
             return {}
 
         print("\n" + "=" * 60)
-        print("STAGE 3: Full Fine-tuning")
+        print("STAGE 2: Full Fine-tuning")
         print("=" * 60)
 
-        config = self.stage3_config
+        config = self.stage2_config
 
         # Unfreeze all parameters
         self._unfreeze_all()
 
         # Create training arguments
         training_args = TrainingArguments(
-            output_dir=str(self.output_dir / "stage3-training"),
+            output_dir=str(self.output_dir / "stage2-training"),
             num_train_epochs=config.num_epochs,
             per_device_train_batch_size=config.batch_size,
             per_device_eval_batch_size=config.batch_size,
@@ -469,11 +314,11 @@ class ThreeStageTrainer:
         print(f"Final model saved to: {final_path}")
 
         clear_memory()
-        return {"stage3_loss": train_result.metrics.get("train_loss", 0)}
+        return {"stage2_loss": train_result.metrics.get("train_loss", 0)}
 
     def train(self, dataset) -> Dict:
         """
-        Run full 3-stage training.
+        Run full 2-stage training.
 
         Args:
             dataset: HuggingFace dataset with train/validation splits.
@@ -487,26 +332,16 @@ class ThreeStageTrainer:
 
         results = {}
 
-        # Stage 1: Distillation
-        stage1_results = self.train_stage1_distillation(tokenized_dataset)
+        # Stage 1: Memory-only fine-tuning
+        stage1_results = self.train_stage1_memory_only(tokenized_dataset)
         results.update(stage1_results)
 
-        # Release base model to save memory
-        if self.base_model is not None:
-            del self.base_model
-            self.base_model = None
-            clear_memory()
-
-        # Stage 2: Memory-only fine-tuning
-        stage2_results = self.train_stage2_memory_only(tokenized_dataset)
+        # Stage 2: Full fine-tuning
+        stage2_results = self.train_stage2_full_finetune(tokenized_dataset)
         results.update(stage2_results)
 
-        # Stage 3: Full fine-tuning
-        stage3_results = self.train_stage3_full_finetune(tokenized_dataset)
-        results.update(stage3_results)
-
         print("\n" + "=" * 60)
-        print("3-Stage Training Complete!")
+        print("2-Stage Training Complete!")
         print("=" * 60)
         print(f"Results: {results}")
         print(f"Final model: {self.output_dir / 'senri-trained'}")

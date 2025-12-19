@@ -31,7 +31,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import ConfigManager
-from src.training import ThreeStageTrainer
+from src.training import TwoStageTrainer
 from src.data import load_training_dataset
 from src.utils import get_device
 
@@ -157,42 +157,35 @@ def test_memory():
 
 def train_experiment():
     """
-    Run 3-stage training experiment.
+    Run 2-stage training experiment.
 
-    Stage 1: Layer Distillation - メモリレイヤーの出力をベースモデルに近づける
-    Stage 2: Memory-only Fine-tuning - メモリレイヤーのみ学習
-    Stage 3: Full Fine-tuning - 全体を低学習率で調整
+    Stage 1: Memory-only Fine-tuning - メモリレイヤーのみ学習
+    Stage 2: Full Fine-tuning - 全体を低学習率で調整
     """
     print("=" * 50)
-    print("3-Stage Training Experiment")
+    print("2-Stage Training Experiment")
     print("=" * 50)
 
     config_manager = ConfigManager()
     setup_environment(config_manager.seed)
 
-    # Get 3-stage configs
-    stage1_config, stage2_config, stage3_config = (
-        config_manager.get_three_stage_config()
-    )
+    # Get 2-stage configs
+    stage1_config, stage2_config = config_manager.get_two_stage_config()
 
     print("\nStage Configurations:")
     print(
-        f"  Stage 1 (Distillation): lr={stage1_config.learning_rate}, epochs={stage1_config.num_epochs}"
+        f"  Stage 1 (Memory-only): lr={stage1_config.learning_rate}, epochs={stage1_config.num_epochs}"
     )
     print(
-        f"  Stage 2 (Memory-only): lr={stage2_config.learning_rate}, epochs={stage2_config.num_epochs}"
-    )
-    print(
-        f"  Stage 3 (Full fine-tune): lr={stage3_config.learning_rate}, epochs={stage3_config.num_epochs}"
+        f"  Stage 2 (Full fine-tune): lr={stage2_config.learning_rate}, epochs={stage2_config.num_epochs}"
     )
 
-    # Create 3-stage trainer
-    trainer = ThreeStageTrainer(
+    # Create 2-stage trainer
+    trainer = TwoStageTrainer(
         base_model_name=config_manager.base_model_name,
         output_dir=config_manager.output_dir,
         stage1_config=stage1_config,
         stage2_config=stage2_config,
-        stage3_config=stage3_config,
         max_length=config_manager.max_length,
         seed=config_manager.seed,
     )
@@ -206,14 +199,14 @@ def train_experiment():
     dataset = load_training_dataset(
         dataset_name=config_manager.dataset_name,
         dataset_config=config_manager.dataset_config,
-        niah_ratio=0.0,  # NIAH disabled for initial distillation
+        niah_ratio=0.0,
         max_train_samples=config_manager.max_train_samples,
         max_val_samples=config_manager.max_val_samples,
         seed=config_manager.seed,
     )
 
-    # Run 3-stage training
-    print("\n[Step 3] Running 3-stage training...")
+    # Run 2-stage training
+    print("\n[Step 3] Running 2-stage training...")
     results = trainer.train(dataset)
 
     print("\n" + "=" * 50)

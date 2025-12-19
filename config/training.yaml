@@ -1,4 +1,4 @@
-# Senri 3-Stage Training Configuration
+# Senri 2-Stage Training Configuration
 
 # Dataset settings
 dataset:
@@ -8,45 +8,33 @@ dataset:
   max_train_samples: 1000
   max_val_samples: 100
 
-# 3-Stage Training Configuration
+# 2-Stage Training Configuration
 #
-# Stage 1: Distillation - メモリレイヤーの出力をベースレイヤーに近づける
-# Stage 2: Memory-only - メモリレイヤーのみ学習（他はフリーズ）
-# Stage 3: Full fine-tuning - 全体を低学習率で調整
+# Stage 1: Memory-only - メモリレイヤーのみ学習（他はフリーズ）
+# Stage 2: Full fine-tuning - 全体を低学習率で調整
 
-three_stage:
-  # Stage 1: Layer Distillation
+two_stage:
+  # Stage 1: Memory-only Fine-tuning
   stage1:
-    enabled: true
-    num_epochs: 1
-    batch_size: 2
-    gradient_accumulation_steps: 4
-    learning_rate: 5.0e-5  # Moderate LR for distillation
-    warmup_ratio: 0.1
-    max_train_samples: 500
-    max_val_samples: 50
-
-  # Stage 2: Memory-only Fine-tuning
-  stage2:
     enabled: true
     num_epochs: 2
     batch_size: 1
     gradient_accumulation_steps: 8
     learning_rate: 5.0e-5  # Medium LR
     warmup_ratio: 0.1
-    niah_ratio: 0.01  # Enable NIAH for memory training
+    niah_ratio: 0.0
     max_train_samples: 1000
     max_val_samples: 100
 
-  # Stage 3: Full Fine-tuning
-  stage3:
+  # Stage 2: Full Fine-tuning
+  stage2:
     enabled: true
     num_epochs: 1
     batch_size: 1
     gradient_accumulation_steps: 8
     learning_rate: 1.0e-5  # Lower LR for fine adjustment
     warmup_ratio: 0.05
-    niah_ratio: 0.01
+    niah_ratio: 0.0
     max_train_samples: 1000
     max_val_samples: 100
 

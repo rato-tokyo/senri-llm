@@ -53,7 +53,7 @@ def load_experiment_config() -> Dict[str, Any]:
 
 
 class ConfigManager:
-    """Unified configuration manager for 3-stage training."""
+    """Unified configuration manager for 2-stage training."""
 
     def __init__(self, config_override: Optional[Dict[str, Any]] = None):
         self._model = load_model_config()
@@ -156,20 +156,20 @@ class ConfigManager:
             ],
         )
 
-    def get_three_stage_config(self):
+    def get_two_stage_config(self):
         """
-        Get 3-stage training configuration.
+        Get 2-stage training configuration.
 
         Returns:
-            Tuple of (stage1_config, stage2_config, stage3_config) as StageConfig instances.
+            Tuple of (stage1_config, stage2_config) as StageConfig instances.
         """
-        from ..training.three_stage_trainer import StageConfig
+        from ..training.two_stage_trainer import StageConfig
 
-        three_stage = self._training.get("three_stage", {})
+        two_stage = self._training.get("two_stage", {})
         optimization = self._training.get("optimization", {})
 
         def make_stage_config(stage_name: str) -> StageConfig:
-            stage = three_stage.get(stage_name, {})
+            stage = two_stage.get(stage_name, {})
             return StageConfig(
                 enabled=stage.get("enabled", True),
                 num_epochs=stage.get("num_epochs", 1),
@@ -190,5 +190,4 @@ class ConfigManager:
         return (
             make_stage_config("stage1"),
             make_stage_config("stage2"),
-            make_stage_config("stage3"),
         )

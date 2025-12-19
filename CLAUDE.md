@@ -4,28 +4,18 @@
 
 Senri-LLMは、**SmolLM-135M**をベースに、シンプルなテンソル積メモリを実装するプロジェクトです。
 
-**現在のステータス**: 3段階学習方式（蒸留→メモリ学習→全体調整）
+**現在のステータス**: 2段階学習方式（メモリ学習→全体調整）
 
-## 3段階学習アプローチ
+## 2段階学習アプローチ
 
-### 問題背景
+### 解決策: 2段階学習
 
-線形Attentionレイヤーは、単純にSoftmax Attentionレイヤーと置換するだけでは機能しません。
-出力分布の違いがノイズとして後続レイヤーに伝播し、モデル全体の性能が劣化します。
-
-### 解決策: 3段階学習
-
-**Stage 1: Layer Distillation**
-- メモリレイヤーの出力をベースモデルのAttention出力に近づける
-- Loss: `MSE(memory_output, base_output.detach())`
-- 学習率: 高め (1e-4)
-
-**Stage 2: Memory-only Fine-tuning**
+**Stage 1: Memory-only Fine-tuning**
 - メモリレイヤー以外をフリーズ
 - 言語モデリング損失で学習
 - 学習率: 中程度 (5e-5)
 
-**Stage 3: Full Fine-tuning**
+**Stage 2: Full Fine-tuning**
 - 全パラメータをアンフリーズ
 - 低学習率で全体を調整
 - 学習率: 低め (1e-5)
@@ -33,7 +23,7 @@ Senri-LLMは、**SmolLM-135M**をベースに、シンプルなテンソル積�
 ### 使用方法
 
 ```bash
-# 3段階学習を実行
+# 2段階学習を実行
 python scripts/colab.py train
 
 # 評価
@@ -48,7 +38,7 @@ python scripts/colab.py test
 ### Core Concept
 
 ```
-入力 → QKV投影 → メモリ更新 → メモリ検索 → 出力投影
+入力 → QKV投影 → スケーリング → メモリ更新 → メモリ検索 → 出力投影
 ```
 
 **特徴**:
@@ -57,6 +47,7 @@ python scripts/colab.py test
 - バッチ共有メモリ `[d, d]`
 - 完全detach（安定性優先）
 - **update → retrieve 順序**
+- **スケーリング係数**: `1/sqrt(hidden_size)` で数値安定性を確保
 
 ### Base Model: SmolLM-135M
 
@@ -73,26 +64,28 @@ python scripts/colab.py test
 ### Layer Structure (30 layers total)
 
 ```
-Layer 0-9:   Standard Attention (RoPE)
-Layer 10:    Memory-only Attention (NoPE)
-Layer 11-19: Standard Attention (RoPE)
+Layer 0-14:  Standard Attention (RoPE)
+Layer 15:    Memory-only Attention (NoPE)
+Layer 16-19: Standard Attention (RoPE)
 Layer 20:    Memory-only Attention (NoPE)
-Layer 21-29: Standard Attention (RoPE)
+Layer 21-24: Standard Attention (RoPE)
+Layer 25:    Memory-only Attention (NoPE)
+Layer 26-29: Standard Attention (RoPE)
 ```
 
 ### Memory Layer Configuration
 
-- `num_memory_layers`: 2
-- `first_memory_layer`: 10
-- `memory_layer_interval`: 10
-- メモリレイヤーのインデックス: [10, 20]
+- `num_memory_layers`: 3
+- `first_memory_layer`: 15
+- `memory_layer_interval`: 5
+- メモリレイヤーのインデックス: [15, 20, 25]
 
 ## Key Classes
 
 ```python
-# src/training/three_stage_trainer.py
-class ThreeStageTrainer:
-    """3段階学習を実行するトレーナー"""
+# src/training/two_stage_trainer.py
+class TwoStageTrainer:
+    """2段階学習を実行するトレーナー"""
 
 # src/memory/base_memory.py
 class TensorMemory:
@@ -113,16 +106,12 @@ class SenriConfig(LlamaConfig):
 
 ```yaml
 # config/training.yaml
-three_stage:
+two_stage:
   stage1:
-    enabled: true
-    num_epochs: 1
-    learning_rate: 1.0e-4
-  stage2:
     enabled: true
     num_epochs: 2
     learning_rate: 5.0e-5
-  stage3:
+  stage2:
     enabled: true
     num_epochs: 1
     learning_rate: 1.0e-5
@@ -146,6 +135,24 @@ with model.new_sequence():
 output = model(input_ids)
 ```
 
+## 重要な知見
+
+### L2正規化は使用禁止
+
+L2正規化はベクトルの magnitude 情報を破壊し、モデルの言語能力を崩壊させます。
+代わりにスケーリング係数を使用してください。
+
+```python
+# ❌ 絶対にやってはいけない
+keys = F.normalize(keys, p=2, dim=-1)
+
+# ✅ 正しいアプローチ
+scale = 1.0 / (hidden_size ** 0.5)
+keys = keys * scale
+```
+
+詳細は `docs/layer-replacement-guidelines.md` を参照。
+
 ## Dependencies
 
 ```
@@ -162,15 +169,15 @@ tqdm
 senri-llm/
 ├── config/
 │   ├── model.yaml          # モデルアーキテクチャ
-│   ├── training.yaml       # 3段階学習設定
+│   ├── training.yaml       # 2段階学習設定
 │   └── experiment.yaml     # 実験設定
 ├── scripts/
 │   ├── colab.py            # メイン実行スクリプト
 │   ├── convert_to_senri.py # モデル変換
-│   └── poc_memory.py       # PoCテスト
+│   └── debug_generation.py # デバッグ用
 ├── src/
 │   ├── training/
-│   │   └── three_stage_trainer.py  # 3段階トレーナー
+│   │   └── two_stage_trainer.py   # 2段階トレーナー
 │   ├── memory/
 │   │   └── base_memory.py  # TensorMemory
 │   ├── attention/
@@ -178,7 +185,8 @@ senri-llm/
 │   ├── modeling_senri.py   # SenriForCausalLM
 │   └── configuration_senri.py  # SenriConfig
 └── docs/
-    └── findings-memory-layer-integration.md  # 知見
+    ├── findings-memory-layer-integration.md  # 知見
+    └── layer-replacement-guidelines.md       # レイヤー置換ガイドライン
 ```
 
 ## Experiment Environment
