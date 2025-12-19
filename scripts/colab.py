@@ -81,14 +81,11 @@ def test_model():
 
     from src.attention.senri_attention import SenriAttention
 
+    # Current simplified API: only needs hidden_size, num_attention_heads, num_key_value_heads
     attention = SenriAttention(
         hidden_size=config.hidden_size,
         num_attention_heads=config.num_attention_heads,
         num_key_value_heads=config.num_key_value_heads,
-        head_dim=config.hidden_size // config.num_attention_heads,
-        sliding_window_size=config.sliding_window_size,
-        chunk_size=config.chunk_size,
-        top_k_memories=config.top_k_memories,
     )
     attention = attention.to(device)
 
@@ -97,15 +94,22 @@ def test_model():
     seq_len = 128
     hidden_states = torch.randn(batch_size, seq_len, config.hidden_size, device=device)
 
+    # Test training mode
     attention.train()
     output_train, _, _ = attention(hidden_states)
     print(f"  Training mode output shape: {output_train.shape}")
 
+    # Test eval mode
     attention.eval()
-    attention.reset_memory(device, hidden_states.dtype)
     with torch.no_grad():
         output_eval, _, _ = attention(hidden_states)
     print(f"  Inference mode output shape: {output_eval.shape}")
+
+    # Verify output is not all zeros (memory should have values after update->retrieve)
+    if output_eval.abs().sum() > 0:
+        print("  Memory retrieval working (non-zero output)")
+    else:
+        print("  WARNING: Output is all zeros!")
 
     print("\nTest passed!")
 
@@ -116,7 +120,7 @@ def test_memory():
     print("Testing Tensor Memory")
     print("=" * 50)
 
-    from src.memory import TensorMemory, OrthogonalBasisMemory, SenriMemory
+    from src.memory import TensorMemory
 
     config_manager = ConfigManager()
     model_config = config_manager.model
@@ -125,59 +129,38 @@ def test_memory():
     print(f"\nUsing device: {device}")
 
     batch_size = 2
-    num_heads = model_config["architecture"]["num_attention_heads"]
     seq_len = 64
-    head_dim = model_config["architecture"]["head_dim"]
     hidden_size = model_config["architecture"]["hidden_size"]
 
-    print("\n1. Testing TensorMemory (training mode)...")
-    memory = TensorMemory(num_heads=num_heads, head_dim=head_dim)
-    memory.reset(batch_size, device, torch.float32)
+    print("\n1. Testing TensorMemory...")
+    memory = TensorMemory(memory_dim=hidden_size)
+    memory.reset(device, torch.float32)
 
-    k = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
-    v = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
-    q = torch.randn(batch_size, num_heads, seq_len, head_dim, device=device)
+    # Shape: [batch, seq, memory_dim]
+    k = torch.randn(batch_size, seq_len, hidden_size, device=device)
+    v = torch.randn(batch_size, seq_len, hidden_size, device=device)
+    q = torch.randn(batch_size, seq_len, hidden_size, device=device)
 
+    # Test update then retrieve
     memory.update(k, v)
     output = memory.retrieve(q)
     print(f"  Output shape: {output.shape}")
-    assert output.shape == (batch_size, num_heads, seq_len, head_dim)
+    assert output.shape == (batch_size, seq_len, hidden_size)
+
+    # Verify non-zero output
+    if output.abs().sum() > 0:
+        print("  Memory retrieval working (non-zero output)")
+    else:
+        print("  WARNING: Output is all zeros!")
+
     print("  TensorMemory test passed!")
 
-    print("\n2. Testing OrthogonalBasisMemory (inference mode)...")
-    top_k = model_config["senri"]["top_k_memories"]
-    memory_ortho = OrthogonalBasisMemory(
-        num_heads=num_heads,
-        head_dim=head_dim,
-        hidden_size=hidden_size,
-        top_k=top_k,
-    )
-    memory_ortho.reset(batch_size, device, torch.float32)
-
-    memory_ortho.update(k, v)
-    output_ortho = memory_ortho.retrieve(q)
-    print(f"  Output shape: {output_ortho.shape}")
-    assert output_ortho.shape == (batch_size, num_heads, seq_len, head_dim)
-    print("  OrthogonalBasisMemory test passed!")
-
-    print("\n3. Testing SenriMemory (unified interface)...")
-    senri_memory = SenriMemory(
-        num_heads=num_heads,
-        head_dim=head_dim,
-        hidden_size=hidden_size,
-        top_k=top_k,
-    )
-    senri_memory.train()
-    senri_memory.reset(batch_size, device, torch.float32)
-    senri_memory.update(k, v)
-    output_train = senri_memory.retrieve(q)
-    print(f"  Training mode output shape: {output_train.shape}")
-
-    senri_memory.eval()
-    senri_memory.reset(batch_size, device, torch.float32)
-    senri_memory.update(k, v)
-    output_eval = senri_memory.retrieve(q)
-    print(f"  Inference mode output shape: {output_eval.shape}")
+    print("\n2. Testing empty memory retrieval...")
+    memory2 = TensorMemory(memory_dim=hidden_size)
+    memory2.reset(device, torch.float32)
+    output_empty = memory2.retrieve(q)
+    assert torch.allclose(output_empty, torch.zeros_like(output_empty))
+    print("  Empty memory returns zeros (correct)")
 
     print("\nAll memory tests passed!")
 

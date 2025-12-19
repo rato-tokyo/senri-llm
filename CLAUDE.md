@@ -33,7 +33,7 @@ git checkout <hash-before-simplification> -- src/
 ### Core Concept（最シンプル版）
 
 ```
-入力 → QKV投影 → メモリ検索 → メモリ更新 → 出力投影
+入力 → QKV投影 → メモリ更新 → メモリ検索 → 出力投影
 ```
 
 **特徴**:
@@ -41,6 +41,7 @@ git checkout <hash-before-simplification> -- src/
 - 位置エンコーディングなし（NoPE）
 - バッチ共有メモリ `[d, d]`
 - 完全detach（安定性優先）
+- **update → retrieve 順序**（現在のトークンも出力に貢献）
 
 ### Why Memory-Only (No Local Attention)
 
@@ -147,11 +148,13 @@ class SenriAttention(nn.Module):
         k = self._repeat_kv(k, self.num_key_value_groups)
         v = self._repeat_kv(v, self.num_key_value_groups)
 
-        if self.training:
+        # メモリ初期化（未初期化の場合のみ）
+        if self.memory.M is None:
             self.memory.reset(device, dtype)
 
-        output = self.memory.retrieve(q)
+        # update → retrieve 順序（現在のトークンも出力に貢献）
         self.memory.update(k, v)
+        output = self.memory.retrieve(q)
 
         return self.o_proj(output), None, None
 ```
@@ -188,21 +191,63 @@ class SenriConfig(LlamaConfig):
 | 完全detach | 完全detach |
 | `/(batch*seq)` | `/(batch*seq)` |
 
-## Training vs Inference
+## Memory Lifecycle (メモリ管理)
 
-| 項目 | 学習時 | 推論時 |
-|------|--------|--------|
-| **メモリリセット** | 毎forward() | 手動 |
-| **勾配** | なし（detach） | なし |
+### 状態プロパティ
 
 ```python
-# 学習時: forward()内で自動リセット
-model.train()
+memory = TensorMemory(memory_dim=576)
+memory.is_initialized  # False - まだ初期化されていない
+memory.is_empty        # True  - 中身がない
 
-# 推論時: 手動リセット
-model.eval()
-model.reset_memory(device, dtype)
-outputs = model.generate(**inputs)
+memory.reset(device, dtype)
+memory.is_initialized  # True  - 初期化済み
+memory.is_empty        # True  - まだ中身なし
+
+memory.update(k, v)
+memory.is_empty        # False - 中身あり
+```
+
+### メモリリセットの責任
+
+| コンポーネント | 責任 |
+|---------------|------|
+| `TensorMemory` | `reset()`, `update()`, `retrieve()` の実装 |
+| `SenriAttention` | 未初期化時の lazy init のみ |
+| `SenriForCausalLM` | シーケンス開始時のリセット（自動 or `new_sequence()`） |
+
+### Context Manager API（推奨）
+
+```python
+# 明示的なシーケンス境界
+with model.new_sequence():
+    output = model(input_ids)
+    # or
+    output = model.generate(input_ids, ...)
+
+# 複数シーケンスを独立に処理
+for batch in dataloader:
+    with model.new_sequence():
+        output = model(batch)
+```
+
+### 自動リセット（従来互換）
+
+```python
+# past_key_values が None の場合、自動でリセットされる
+output = model(input_ids)  # 自動リセット
+output = model.generate(input_ids, ...)  # 自動リセット
+```
+
+### メモリの流れ
+
+```
+1. forward() 開始
+2. past_key_values is None? → リセット
+3. 各レイヤーで:
+   - SenriAttention: update → retrieve（蓄積）
+   - StandardAttention: 通常の処理
+4. 次のforward()へ（generate時は蓄積継続）
 ```
 
 ## Configuration Management
@@ -226,27 +271,39 @@ datasets>=2.14.0
 
 ## Common Pitfalls
 
-### 1. 推論時のメモリリセット忘れ
-```python
-# Bad
-model.eval()
-outputs = model.generate(...)  # メモリが前回の状態のまま
+### 1. SenriAttention内でリセットしない
 
-# Good
-model.eval()
-model.reset_memory(device, dtype)  # 明示的にリセット
-outputs = model.generate(...)
+```python
+# Bad - 毎forward()でリセットすると常にゼロ出力
+def forward(...):
+    self.memory.reset(...)  # NG!
+
+# Good - 初期化のみ（is_initialized使用）
+def forward(...):
+    if not self.memory.is_initialized:
+        self.memory.reset(...)
 ```
 
-### 2. 学習時のretrieve→update順序
+### 2. update → retrieve 順序
+
 ```python
-# 現在の実装（正しい）
-output = self.memory.retrieve(q)  # まず検索
-self.memory.update(k, v)          # その後更新
+# 正しい順序
+self.memory.update(k, v)          # まず更新
+output = self.memory.retrieve(q)  # その後検索
+# 現在のトークンも出力に貢献する
+
+# 逆順だと空メモリから検索 → ゼロ出力
 ```
 
-学習時は毎回メモリがリセットされるため、retrieve→update順序では
-最初のretrieveがゼロを返す。これは意図した動作（学習時はメモリなしで学習）。
+### 3. 明示的なシーケンス境界を使う
+
+```python
+# 推奨: context manager で意図を明確に
+with model.new_sequence():
+    output = model(input_ids)
+
+# 自動リセットに依存しない方が安全
+```
 
 ## Experiment Environment
 

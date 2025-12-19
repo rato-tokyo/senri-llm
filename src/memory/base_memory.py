@@ -59,6 +59,18 @@ class TensorMemory(nn.Module):
         self.register_buffer("M", None, persistent=False)
         self.register_buffer("z", None, persistent=False)
 
+    @property
+    def is_initialized(self) -> bool:
+        """Check if memory has been initialized."""
+        return self.M is not None and self.z is not None
+
+    @property
+    def is_empty(self) -> bool:
+        """Check if memory is empty (initialized but no content)."""
+        if not self.is_initialized:
+            return True
+        return bool(self.z.abs().sum() < self.eps)
+
     def reset(
         self,
         device: Optional[torch.device] = None,

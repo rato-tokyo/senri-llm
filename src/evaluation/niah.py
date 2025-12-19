@@ -203,11 +203,8 @@ class NIAHEvaluator:
                 max_length=context_length,
             ).to(self.device)
 
-            # Reset memory before processing new sequence
-            # This is critical for long-context evaluation
-            if hasattr(self.model, "reset_memory"):
-                dtype = next(self.model.parameters()).dtype
-                self.model.reset_memory(self.device, dtype)
+            # Note: Memory reset is now handled automatically in model.forward()
+            # when past_key_values is None (start of new sequence)
 
             # Generate
             with torch.no_grad():

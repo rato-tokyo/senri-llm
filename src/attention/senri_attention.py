@@ -131,14 +131,17 @@ class SenriAttention(nn.Module):
         keys = self._repeat_kv(keys, self.num_key_value_groups)
         values = self._repeat_kv(values, self.num_key_value_groups)
 
-        # Memory reset at training (each sample independent)
-        if self.training:
+        # Memory lifecycle:
+        # - Initialization: happens here on first forward (lazy init)
+        # - Reset: handled by SenriForCausalLM.forward() or new_sequence()
+        # - Accumulation: memory grows within a sequence across forward calls
+        if not self.memory.is_initialized:
             self.memory.reset(hidden_states.device, hidden_states.dtype)
 
-        # Memory operations
-        # Order: retrieve -> update (causal, following paper)
-        output = self.memory.retrieve(queries)
+        # Memory operations: update -> retrieve
+        # This order ensures current tokens contribute to output
         self.memory.update(keys, values)
+        output = self.memory.retrieve(queries)
 
         # Output projection
         output = self.o_proj(output)

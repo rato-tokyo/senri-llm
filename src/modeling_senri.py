@@ -1,6 +1,7 @@
 """Senri model implementation based on Llama architecture (compatible with SmolLM, Llama)."""
 
-from typing import Optional, Tuple, Union
+from contextlib import contextmanager
+from typing import Iterator, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -243,9 +244,40 @@ class SenriForCausalLM(SenriPreTrainedModel):
     def get_decoder(self):
         return self.model
 
-    def reset_memory(self, device: torch.device, dtype: torch.dtype):
-        """Reset memory for all Senri Memory layers."""
+    def reset_memory(
+        self,
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
+    ):
+        """
+        Reset memory for all Senri Memory layers.
+
+        Args:
+            device: Device for memory tensors. If None, uses model's device.
+            dtype: Data type for memory tensors. If None, uses model's dtype.
+        """
+        if device is None:
+            device = self.lm_head.weight.device
+        if dtype is None:
+            dtype = self.lm_head.weight.dtype
         self.model.reset_memory(device, dtype)
+
+    @contextmanager
+    def new_sequence(self) -> Iterator[None]:
+        """
+        Context manager for processing a new sequence.
+
+        Resets memory on entry, ensuring each sequence starts fresh.
+        This makes the memory lifecycle explicit and visible.
+
+        Example:
+            with model.new_sequence():
+                output = model(input_ids)
+                # or
+                output = model.generate(input_ids, ...)
+        """
+        self.reset_memory()
+        yield
 
     def forward(
         self,
@@ -260,6 +292,13 @@ class SenriForCausalLM(SenriPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
+        # Reset memory at the start of new sequences only
+        # Skip reset during autoregressive generation (when past_key_values exists)
+        if past_key_values is None:
+            device = input_ids.device if input_ids is not None else inputs_embeds.device  # type: ignore
+            dtype = self.lm_head.weight.dtype
+            self.reset_memory(device, dtype)
+
         output_attentions = (
             output_attentions
             if output_attentions is not None
