@@ -434,6 +434,7 @@ class ThreeStageTrainer:
         )
 
         # Data collator
+        assert self.tokenizer is not None
         data_collator = DataCollatorForLanguageModeling(
             tokenizer=self.tokenizer,
             mlm=False,
