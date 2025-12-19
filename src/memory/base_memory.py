@@ -142,6 +142,9 @@ class TensorMemory(nn.Module):
         # Normalize by batch_size * seq_len for stability
         delta_M = delta_M / (batch_size * seq_len)
 
+        # Clip extreme values to prevent accumulation issues
+        delta_M = torch.clamp(delta_M, min=-10.0, max=10.0)
+
         # Skip update if delta contains NaN/Inf (safety check)
         if torch.isnan(delta_M).any() or torch.isinf(delta_M).any():
             logger.warning(
@@ -152,7 +155,8 @@ class TensorMemory(nn.Module):
             return
 
         # Complete detach for stability (following new-llm)
-        self.M = (self.M + delta_M).detach()
+        # Also clip memory to prevent unbounded growth
+        self.M = torch.clamp(self.M + delta_M, min=-100.0, max=100.0).detach()
 
         # Update normalization term
         delta_z = sigma_keys.sum(dim=(0, 1)) / batch_size  # [memory_dim]
@@ -165,7 +169,8 @@ class TensorMemory(nn.Module):
             )
             return
 
-        self.z = (self.z + delta_z).detach()
+        # Clip z to prevent unbounded growth
+        self.z = torch.clamp(self.z + delta_z, min=self.eps, max=1000.0).detach()
 
     def retrieve(
         self,

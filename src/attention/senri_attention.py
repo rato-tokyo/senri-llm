@@ -10,6 +10,7 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from ..memory import TensorMemory
 from ..utils import repeat_kv, get_device_and_dtype_from_module
@@ -118,6 +119,12 @@ class SenriAttention(nn.Module):
         # [batch, seq, num_kv_heads * head_dim] -> [batch, seq, num_heads * head_dim]
         keys = self._repeat_kv(keys, self.num_key_value_groups)
         values = self._repeat_kv(values, self.num_key_value_groups)
+
+        # L2 normalize keys and values to prevent numerical explosion in memory
+        # This is critical for stability when computing outer products
+        keys = F.normalize(keys, p=2, dim=-1)
+        values = F.normalize(values, p=2, dim=-1)
+        queries = F.normalize(queries, p=2, dim=-1)
 
         # Memory lifecycle:
         # - Initialization: happens here on first forward (lazy init)
