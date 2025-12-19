@@ -10,7 +10,6 @@ from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from ..memory import TensorMemory
 from ..utils import repeat_kv, get_device_and_dtype_from_module
@@ -123,7 +122,7 @@ class SenriAttention(nn.Module):
         # Scale down keys/values to prevent numerical explosion in memory
         # Instead of L2 normalization (which destroys magnitude info), use simple scaling
         # This preserves relative magnitudes while preventing overflow
-        scale = 1.0 / (self.hidden_size ** 0.5)  # Similar to attention scaling
+        scale = 1.0 / (self.hidden_size**0.5)  # Similar to attention scaling
         keys = keys * scale
         values = values * scale
         queries = queries * scale

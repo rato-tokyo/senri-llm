@@ -72,9 +72,9 @@ def main():
         )
 
     # Decode full response
-    full_response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    tokenizer.decode(outputs[0], skip_special_tokens=True)
     new_tokens = tokenizer.decode(
-        outputs[0][inputs["input_ids"].shape[1]:],
+        outputs[0][inputs["input_ids"].shape[1] :],
         skip_special_tokens=True,
     )
 
@@ -113,16 +113,16 @@ def main():
         )
 
     response2 = tokenizer.decode(
-        outputs2[0][inputs2["input_ids"].shape[1]:],
+        outputs2[0][inputs2["input_ids"].shape[1] :],
         skip_special_tokens=True,
     )
 
     print(f"Response: {repr(response2)}")
 
     if passkey in response2:
-        print(f"✅ SUCCESS: Passkey found!")
+        print("✅ SUCCESS: Passkey found!")
     else:
-        print(f"❌ FAILED: Passkey NOT found.")
+        print("❌ FAILED: Passkey NOT found.")
 
     # Test perplexity on a simple sentence
     print("\n" + "=" * 60)
@@ -147,7 +147,7 @@ def main():
             )
 
         response3 = tokenizer.decode(
-            outputs3[0][inputs3["input_ids"].shape[1]:],
+            outputs3[0][inputs3["input_ids"].shape[1] :],
             skip_special_tokens=True,
         )
 
