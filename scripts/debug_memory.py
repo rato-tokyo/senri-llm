@@ -72,24 +72,25 @@ def main():
         print(f"  z sum: {memory.z.sum():.4f}, z abs max: {memory.z.abs().max():.4f}")
         print(f"  Memory is_empty: {memory.is_empty}")
 
-    # Check layer outputs
-    print("\n=== Layer output comparison ===")
-    # Run forward with hooks to capture intermediate outputs
-    layer_outputs = {}
+    # Check layer outputs - capture attention outputs specifically
+    print("\n=== Attention output comparison ===")
+    attention_outputs = {}
+    layer_inputs = {}
 
-    def make_hook(name):
+    def make_attn_hook(name):
         def hook(module, input, output):
+            layer_inputs[name] = input[0].detach()  # hidden_states input
             if isinstance(output, tuple):
-                layer_outputs[name] = output[0].detach()
+                attention_outputs[name] = output[0].detach()
             else:
-                layer_outputs[name] = output.detach()
+                attention_outputs[name] = output.detach()
         return hook
 
-    # Register hooks
+    # Register hooks on attention modules
     hooks = []
     for idx in [14, 15, 16]:  # Layer before, memory layer, layer after
         layer = model.model.layers[idx]
-        hook = layer.register_forward_hook(make_hook(f"layer_{idx}"))
+        hook = layer.self_attn.register_forward_hook(make_attn_hook(f"attn_{idx}"))
         hooks.append(hook)
 
     # Forward again
@@ -101,9 +102,16 @@ def main():
     for hook in hooks:
         hook.remove()
 
-    # Print layer outputs
-    for name, output in layer_outputs.items():
-        print(f"{name}: shape={output.shape}, mean={output.mean():.4f}, std={output.std():.4f}")
+    # Print attention outputs
+    print("Attention outputs (before residual connection):")
+    for name, output in attention_outputs.items():
+        inp = layer_inputs[name]
+        print(f"  {name}:")
+        print(f"    input:  mean={inp.mean():.4f}, std={inp.std():.4f}, min={inp.min():.4f}, max={inp.max():.4f}")
+        print(f"    output: mean={output.mean():.4f}, std={output.std():.4f}, min={output.min():.4f}, max={output.max():.4f}")
+        # Check if output is similar to input (indicating no real change)
+        diff = (output - inp).abs()
+        print(f"    diff:   mean={diff.mean():.4f}, max={diff.max():.4f}")
 
     # Generate test
     print("\n=== Generation test ===")
