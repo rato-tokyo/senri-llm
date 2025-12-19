@@ -188,6 +188,11 @@ class ConfigManager:
         return self._training["optimization"]["fp16"]
 
     @property
+    def max_grad_norm(self) -> float:
+        """Get max gradient norm for clipping."""
+        return self._training["optimization"].get("max_grad_norm", 1.0)
+
+    @property
     def seed(self) -> int:
         """Get random seed."""
         return self._training["misc"]["seed"]
@@ -231,6 +236,7 @@ class ConfigManager:
             ),
             gradient_checkpointing=self.gradient_checkpointing,
             fp16=self.fp16,
+            max_grad_norm=self.max_grad_norm,
             seed=self.seed,
             dataloader_num_workers=self._training["misc"]["dataloader_num_workers"],
             fresh_start=self.fresh_start,

@@ -139,11 +139,20 @@ class TensorMemory(nn.Module):
         # Normalize by batch_size * seq_len for stability
         delta_M = delta_M / (batch_size * seq_len)
 
+        # Skip update if delta contains NaN/Inf (safety check)
+        if torch.isnan(delta_M).any() or torch.isinf(delta_M).any():
+            return
+
         # Complete detach for stability (following new-llm)
         self.M = (self.M + delta_M).detach()
 
         # Update normalization term
         delta_z = sigma_keys.sum(dim=(0, 1)) / batch_size  # [memory_dim]
+
+        # Skip z update if delta contains NaN/Inf
+        if torch.isnan(delta_z).any() or torch.isinf(delta_z).any():
+            return
+
         self.z = (self.z + delta_z).detach()
 
     def retrieve(
@@ -183,4 +192,10 @@ class TensorMemory(nn.Module):
         denominator = torch.matmul(sigma_queries, self.z)
         denominator = denominator.clamp(min=self.eps).unsqueeze(-1)  # [batch, seq, 1]
 
-        return numerator / denominator
+        output = numerator / denominator
+
+        # NaN/Inf safety check - return zeros if output is invalid
+        if torch.isnan(output).any() or torch.isinf(output).any():
+            return torch.zeros_like(queries)
+
+        return output

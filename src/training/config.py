@@ -38,6 +38,7 @@ class TrainingConfig:
     # Memory optimization
     gradient_checkpointing: bool = True
     fp16: bool = True
+    max_grad_norm: float = 1.0  # Gradient clipping for stability
 
     # Misc
     seed: int = 42
@@ -77,6 +78,7 @@ class TrainingConfig:
             report_to="none",
             seed=self.seed,
             gradient_checkpointing=self.gradient_checkpointing,
+            max_grad_norm=self.max_grad_norm,  # Gradient clipping
             disable_tqdm=True,  # Disable verbose progress bar
             logging_strategy="epoch",  # Log only at epoch end
         )

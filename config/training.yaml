@@ -49,6 +49,7 @@ evaluation:
 optimization:
   gradient_checkpointing: true
   fp16: true
+  max_grad_norm: 1.0  # Gradient clipping for stability
 
 # Misc
 misc:
