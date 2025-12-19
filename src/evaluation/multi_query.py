@@ -21,7 +21,11 @@ import torch
 from transformers import PreTrainedTokenizerBase
 
 from .base import BaseNIAHEvaluator
-from .constants import CHARS_PER_TOKEN_ESTIMATE, MULTI_QUERY_TOKEN_BUFFER, MIN_HAYSTACK_TOKENS_MQ
+from .constants import (
+    CHARS_PER_TOKEN_ESTIMATE,
+    MULTI_QUERY_TOKEN_BUFFER,
+    MIN_HAYSTACK_TOKENS_MQ,
+)
 
 
 @dataclass
@@ -225,7 +229,12 @@ class MultiQueryNIAHEvaluator(BaseNIAHEvaluator):
         questions_text = " ".join(questions)
         needles_tokens = len(self.tokenizer.encode(needles_text))
         questions_tokens = len(self.tokenizer.encode(questions_text))
-        haystack_tokens = context_length - needles_tokens - questions_tokens - MULTI_QUERY_TOKEN_BUFFER
+        haystack_tokens = (
+            context_length
+            - needles_tokens
+            - questions_tokens
+            - MULTI_QUERY_TOKEN_BUFFER
+        )
 
         if haystack_tokens < MIN_HAYSTACK_TOKENS_MQ:
             haystack_tokens = MIN_HAYSTACK_TOKENS_MQ

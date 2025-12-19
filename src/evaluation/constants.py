@@ -4,17 +4,20 @@ Re-exports common constants from src/constants.py and defines
 evaluation-specific constants.
 """
 
-from ..constants import (
-    CHARS_PER_TOKEN_ESTIMATE,
-    PASSKEY_MIN,
-    PASSKEY_MAX,
-    NEEDLE_TOKEN_BUFFER as TOKEN_BUFFER,
-    MULTI_QUERY_TOKEN_BUFFER,
-)
-
 # Minimum haystack tokens
 MIN_HAYSTACK_TOKENS = 100
 MIN_HAYSTACK_TOKENS_MQ = 200  # For multi-query
+
+# Passkey range for random generation
+PASSKEY_MIN = 1000
+PASSKEY_MAX = 9999
+
+# Token estimation
+CHARS_PER_TOKEN_ESTIMATE = 4  # Average characters per token
+
+# Token buffers for prompt construction
+TOKEN_BUFFER = 50  # Buffer for single needle NIAH
+MULTI_QUERY_TOKEN_BUFFER = 100  # Buffer for multi-query NIAH
 
 # Haystack filler text (Paul Graham essays style - commonly used)
 HAYSTACK_TEMPLATE = """

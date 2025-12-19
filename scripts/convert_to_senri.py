@@ -92,7 +92,9 @@ def _convert_embeddings_and_lm_head(base_state_dict: dict) -> dict:
     converted = {}
 
     # Embeddings and final norm
-    converted["model.embed_tokens.weight"] = base_state_dict["model.embed_tokens.weight"]
+    converted["model.embed_tokens.weight"] = base_state_dict[
+        "model.embed_tokens.weight"
+    ]
     converted["model.norm.weight"] = base_state_dict["model.norm.weight"]
 
     # LM head (may be tied to embeddings)

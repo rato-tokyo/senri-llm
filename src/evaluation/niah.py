@@ -96,7 +96,9 @@ class NIAHEvaluator(BaseNIAHEvaluator):
         # Reserve tokens for needle and question
         needle_tokens = len(self.tokenizer.encode(needle))
         question_tokens = len(self.tokenizer.encode(QUESTION_TEMPLATE))
-        haystack_tokens = context_length - needle_tokens - question_tokens - TOKEN_BUFFER
+        haystack_tokens = (
+            context_length - needle_tokens - question_tokens - TOKEN_BUFFER
+        )
 
         if haystack_tokens < MIN_HAYSTACK_TOKENS:
             haystack_tokens = MIN_HAYSTACK_TOKENS
