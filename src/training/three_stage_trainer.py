@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import (
     AutoModelForCausalLM,
@@ -233,9 +232,6 @@ class ThreeStageTrainer:
             weight_decay=config.weight_decay,
         )
 
-        # MSE loss for distillation
-        mse_loss = nn.MSELoss()
-
         total_loss = 0.0
         num_steps = 0
         assert self.senri_model is not None
@@ -279,7 +275,9 @@ class ThreeStageTrainer:
 
                     # Normalize both outputs to compare direction, not magnitude
                     base_norm = torch.nn.functional.normalize(base_output, p=2, dim=-1)
-                    senri_norm = torch.nn.functional.normalize(senri_output, p=2, dim=-1)
+                    senri_norm = torch.nn.functional.normalize(
+                        senri_output, p=2, dim=-1
+                    )
 
                     # Cosine similarity loss: 1 - cos_sim (range: 0 to 2)
                     cos_sim = (base_norm * senri_norm).sum(dim=-1).mean()
