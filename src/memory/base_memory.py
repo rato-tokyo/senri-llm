@@ -69,10 +69,12 @@ class TensorMemory(nn.Module):
 
     @property
     def is_empty(self) -> bool:
-        """Check if memory is empty (initialized but no content)."""
+        """Check if memory is in initial state (identity matrix)."""
         if not self.is_initialized:
             return True
-        return bool(self.z.abs().sum() < self.eps)
+        # Check if M is close to identity matrix
+        identity = torch.eye(self.memory_dim, device=self.M.device, dtype=self.M.dtype)
+        return bool((self.M - identity).abs().max() < self.eps)
 
     def reset(
         self,
@@ -86,15 +88,15 @@ class TensorMemory(nn.Module):
             device: Device for tensors.
             dtype: Data type for tensors.
         """
-        # M: [memory_dim, memory_dim] - batch shared
-        self.M = torch.zeros(
-            self.memory_dim,
+        # M: [memory_dim, memory_dim] - initialize as identity matrix
+        # This ensures retrieve(Q) ≈ Q when memory is fresh (identity mapping)
+        self.M = torch.eye(
             self.memory_dim,
             device=device,
             dtype=dtype,
         )
-        # z: [memory_dim] - normalization term
-        self.z = torch.zeros(self.memory_dim, device=device, dtype=dtype)
+        # z: [memory_dim] - initialize as ones for proper normalization
+        self.z = torch.ones(self.memory_dim, device=device, dtype=dtype)
 
     def _validate_input(self, tensor: torch.Tensor, name: str):
         """Validate input tensor shape."""
@@ -191,11 +193,6 @@ class TensorMemory(nn.Module):
         self._validate_input(queries, "queries")
 
         if self.M is None or self.z is None:
-            return queries
-
-        # Check if memory is empty - return queries as fallback
-        # This preserves information flow when memory hasn't accumulated enough
-        if self.z.abs().sum() < self.eps:
             return queries
 
         # Apply ELU+1 activation to queries
