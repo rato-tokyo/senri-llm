@@ -21,7 +21,7 @@ three_stage:
     num_epochs: 1
     batch_size: 2
     gradient_accumulation_steps: 4
-    learning_rate: 1.0e-4  # Higher LR for fast distillation
+    learning_rate: 5.0e-5  # Moderate LR for distillation
     warmup_ratio: 0.1
     max_train_samples: 500
     max_val_samples: 50
