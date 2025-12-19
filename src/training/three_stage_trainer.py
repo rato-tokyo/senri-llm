@@ -252,7 +252,7 @@ class ThreeStageTrainer:
                 # Get base model hidden states at memory layer positions
                 assert self.base_model is not None
                 with torch.no_grad():
-                    base_outputs = self.base_model(
+                    base_outputs = self.base_model(  # type: ignore[operator]
                         input_ids=input_ids,
                         attention_mask=attention_mask,
                         output_hidden_states=True,
