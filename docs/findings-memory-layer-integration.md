@@ -129,3 +129,111 @@ for name, param in model.named_parameters():
 2. ゲート機構の追加と比較
 3. より大きなモデル（1B+）での検証
 4. 長コンテキストベンチマークでの評価
+
+---
+
+## 2024-12-19 追加知見: メモリ更新時のNaN/Inf問題
+
+### 問題の発見
+
+3段階学習の実行中、以下の警告が頻発した：
+
+```
+WARNING: NaN/Inf detected in memory update delta_M, skipping update.
+keys stats: min=-17.3438, max=17.3750
+values stats: min=-10.6484, max=12.8359
+```
+
+### 根本原因
+
+**1. QKV投影後の値が大きすぎる**
+
+| テンソル | 最小値 | 最大値 |
+|----------|--------|--------|
+| keys     | -17.3  | +17.4  |
+| values   | -10.6  | +12.8  |
+
+**2. 外積計算での数値爆発**
+
+```python
+# メモリ更新の計算
+sigma_keys = ELU(keys) + 1  # 正の値に変換、max ≈ 18.4
+delta_M = torch.einsum("bsd,bse->de", sigma_keys, values)
+```
+
+外積の一要素の計算:
+```
+≈ sigma_keys_max × values_max × batch_size × seq_len
+≈ 18.4 × 12.8 × 2 × 2048
+≈ 964,000
+```
+
+**3. fp16のオーバーフロー**
+
+- fp16の最大表現可能値: 約65,504
+- 計算値（~964,000）がこれを大幅に超過
+- Inf発生 → NaN伝播
+
+### 解決策
+
+**1. L2正規化の追加（SenriAttention）**
+
+```python
+# 投影後、メモリ操作前にL2正規化を適用
+keys = F.normalize(keys, p=2, dim=-1)    # ノルム=1に正規化
+values = F.normalize(values, p=2, dim=-1)
+queries = F.normalize(queries, p=2, dim=-1)
+```
+
+効果: 値の範囲が [-1, +1] に制限され、外積計算の爆発を防止
+
+**2. Clampingの追加（TensorMemory）**
+
+```python
+# delta_Mのクリッピング（更新量の制限）
+delta_M = torch.clamp(delta_M, min=-10.0, max=10.0)
+
+# メモリMのクリッピング（蓄積の制限）
+self.M = torch.clamp(self.M + delta_M, min=-100.0, max=100.0).detach()
+
+# 正規化項zのクリッピング
+self.z = torch.clamp(self.z + delta_z, min=self.eps, max=1000.0).detach()
+```
+
+効果: 複数レベルでの安全策により、万が一の異常値も抑制
+
+### 修正箇所
+
+| ファイル | 変更内容 |
+|----------|----------|
+| `src/attention/senri_attention.py` | L2正規化の追加（lines 124-127） |
+| `src/memory/base_memory.py` | delta_Mクリッピング（line 146） |
+| `src/memory/base_memory.py` | Mクリッピング（line 159） |
+| `src/memory/base_memory.py` | zクリッピング（line 173） |
+
+### 教訓
+
+1. **Linear Attentionでは明示的な正規化が必須**
+   - Softmax Attentionは暗黙的に正規化（和が1になる）
+   - Linear Attentionは正規化がないため、値が発散しやすい
+
+2. **fp16使用時は数値範囲に特に注意**
+   - fp16の最大値は約65,000
+   - 蓄積操作（累積和など）では特に危険
+
+3. **防御的プログラミングの重要性**
+   - 単一の対策ではなく、複数レベルで安全策を講じる
+   - 正規化 + クリッピング + NaN/Inf検出・スキップ
+
+4. **ログの重要性**
+   - NaN/Inf発生時に入力統計を出力することで、原因特定が容易に
+   - 「keys stats: min=-17.3, max=17.3」という情報が問題解決の鍵
+
+### Linear Attention vs Softmax Attention の数値安定性
+
+| 特性 | Softmax Attention | Linear Attention |
+|------|-------------------|------------------|
+| 正規化 | 暗黙的（softmax） | なし（手動必要） |
+| 出力範囲 | 制限あり | 制限なし |
+| 勾配 | 安定 | 発散しやすい |
+| 推奨対策 | 特になし | L2正規化 + Clamping |
