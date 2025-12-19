@@ -15,16 +15,8 @@ architecture:
   num_key_value_heads: 3  # GQA: 9 query heads, 3 KV heads
   head_dim: 64  # hidden_size / num_attention_heads
 
-# Senri-specific settings
+# Senri-specific settings (memory-only architecture)
 senri:
-  # Sliding Window Attention
-  # Smaller window to force memory usage during training
-  sliding_window_size: 1024
-  chunk_size: 64
-
-  # Memory settings
-  top_k_memories: 64
-
   # Memory layer configuration
   # For 30-layer SmolLM: memory at layers 10 and 20
   # Memory layers: [10, 20]

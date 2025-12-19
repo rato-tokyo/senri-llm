@@ -29,6 +29,32 @@ from src.configuration_senri import SenriConfig
 from src.modeling_senri import SenriForCausalLM
 
 
+# Components to copy for each layer
+LAYER_NORM_COMPONENTS = [
+    "input_layernorm.weight",
+    "post_attention_layernorm.weight",
+]
+
+MLP_COMPONENTS = [
+    "mlp.gate_proj.weight",
+    "mlp.up_proj.weight",
+    "mlp.down_proj.weight",
+]
+
+ATTENTION_WEIGHT_COMPONENTS = [
+    "self_attn.q_proj.weight",
+    "self_attn.k_proj.weight",
+    "self_attn.v_proj.weight",
+    "self_attn.o_proj.weight",
+]
+
+ATTENTION_BIAS_COMPONENTS = [
+    "self_attn.q_proj.bias",
+    "self_attn.k_proj.bias",
+    "self_attn.v_proj.bias",
+]
+
+
 def convert_layer_weights(
     base_state_dict: dict, layer_idx: int, has_memory: bool
 ) -> dict:
@@ -46,45 +72,20 @@ def convert_layer_weights(
     converted = {}
     prefix = f"model.layers.{layer_idx}"
 
-    # Layer norm weights
-    converted[f"{prefix}.input_layernorm.weight"] = base_state_dict[
-        f"{prefix}.input_layernorm.weight"
-    ]
-    converted[f"{prefix}.post_attention_layernorm.weight"] = base_state_dict[
-        f"{prefix}.post_attention_layernorm.weight"
-    ]
+    # Copy all standard components
+    all_components = (
+        LAYER_NORM_COMPONENTS + MLP_COMPONENTS + ATTENTION_WEIGHT_COMPONENTS
+    )
 
-    # MLP weights
-    converted[f"{prefix}.mlp.gate_proj.weight"] = base_state_dict[
-        f"{prefix}.mlp.gate_proj.weight"
-    ]
-    converted[f"{prefix}.mlp.up_proj.weight"] = base_state_dict[
-        f"{prefix}.mlp.up_proj.weight"
-    ]
-    converted[f"{prefix}.mlp.down_proj.weight"] = base_state_dict[
-        f"{prefix}.mlp.down_proj.weight"
-    ]
+    for component in all_components:
+        key = f"{prefix}.{component}"
+        converted[key] = base_state_dict[key]
 
-    # Attention weights - Q, K, V, O projections
-    # Now SenriAttention is GQA compatible, so we can copy all weights
-    converted[f"{prefix}.self_attn.q_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.q_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.k_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.k_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.v_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.v_proj.weight"
-    ]
-    converted[f"{prefix}.self_attn.o_proj.weight"] = base_state_dict[
-        f"{prefix}.self_attn.o_proj.weight"
-    ]
-
-    # Handle biases if present (SmolLM has attention biases for Q, K, V)
-    for proj in ["q_proj", "k_proj", "v_proj"]:
-        bias_key = f"{prefix}.self_attn.{proj}.bias"
-        if bias_key in base_state_dict:
-            converted[bias_key] = base_state_dict[bias_key]
+    # Handle optional biases (SmolLM has attention biases for Q, K, V)
+    for component in ATTENTION_BIAS_COMPONENTS:
+        key = f"{prefix}.{component}"
+        if key in base_state_dict:
+            converted[key] = base_state_dict[key]
 
     return converted
 

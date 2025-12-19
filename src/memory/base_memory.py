@@ -93,6 +93,17 @@ class TensorMemory(nn.Module):
         # z: [memory_dim] - normalization term
         self.z = torch.zeros(self.memory_dim, device=device, dtype=dtype)
 
+    def _validate_input(self, tensor: torch.Tensor, name: str):
+        """Validate input tensor shape."""
+        if tensor.ndim != 3:
+            raise ValueError(
+                f"{name} must be 3D [batch, seq, memory_dim], got shape {tensor.shape}"
+            )
+        if tensor.shape[-1] != self.memory_dim:
+            raise ValueError(
+                f"{name} last dim must be {self.memory_dim}, got {tensor.shape[-1]}"
+            )
+
     def update(
         self,
         keys: torch.Tensor,
@@ -104,7 +115,13 @@ class TensorMemory(nn.Module):
         Args:
             keys: [batch, seq, memory_dim]
             values: [batch, seq, memory_dim]
+
+        Raises:
+            ValueError: If input shapes are invalid.
         """
+        self._validate_input(keys, "keys")
+        self._validate_input(values, "values")
+
         if self.M is None:
             self.reset(keys.device, keys.dtype)
 
@@ -141,7 +158,12 @@ class TensorMemory(nn.Module):
 
         Returns:
             output: [batch, seq, memory_dim]
+
+        Raises:
+            ValueError: If input shape is invalid.
         """
+        self._validate_input(queries, "queries")
+
         if self.M is None or self.z is None:
             return torch.zeros_like(queries)
 

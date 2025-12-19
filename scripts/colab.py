@@ -33,13 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import ConfigManager
 from src.training import SenriTrainer
 from src.data import load_training_dataset
-
-
-def get_device():
-    """Get the best available device."""
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
+from src.utils import get_device
 
 
 def setup_environment(seed: int = 42):

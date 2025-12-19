@@ -12,6 +12,7 @@ import torch
 import torch.nn as nn
 
 from ..memory import TensorMemory
+from ..utils import repeat_kv
 
 
 class SenriAttention(nn.Module):
@@ -75,20 +76,7 @@ class SenriAttention(nn.Module):
 
     def _repeat_kv(self, hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
         """Repeat KV heads to match query heads (for GQA)."""
-        if n_rep == 1:
-            return hidden_states
-        batch, seq_len, num_kv_heads_x_head_dim = hidden_states.shape
-        num_kv_heads = num_kv_heads_x_head_dim // self.head_dim
-        # Reshape to [batch, seq, num_kv_heads, head_dim]
-        hidden_states = hidden_states.view(batch, seq_len, num_kv_heads, self.head_dim)
-        # Expand to [batch, seq, num_kv_heads, n_rep, head_dim]
-        hidden_states = hidden_states[:, :, :, None, :].expand(
-            batch, seq_len, num_kv_heads, n_rep, self.head_dim
-        )
-        # Reshape to [batch, seq, num_kv_heads * n_rep * head_dim]
-        return hidden_states.reshape(
-            batch, seq_len, num_kv_heads * n_rep * self.head_dim
-        )
+        return repeat_kv(hidden_states, n_rep, self.head_dim)
 
     def forward(
         self,

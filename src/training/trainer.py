@@ -1,10 +1,8 @@
 """Senri model trainer."""
 
-import gc
 from pathlib import Path
 from typing import Optional
 
-import torch
 from transformers import (
     AutoTokenizer,
     Trainer,
@@ -14,14 +12,8 @@ from transformers import (
 )
 
 from ..modeling_senri import SenriForCausalLM
+from ..utils import get_device, clear_memory
 from .config import TrainingConfig
-
-
-def clear_memory():
-    """Clear GPU memory."""
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
 
 
 class SenriTrainer:
@@ -44,13 +36,7 @@ class SenriTrainer:
         self.config = config
         self.model = model
         self.tokenizer = tokenizer
-        self.device = self._get_device()
-
-    def _get_device(self) -> torch.device:
-        """Get the best available device."""
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        return torch.device("cpu")
+        self.device = get_device()
 
     def setup_model(self) -> SenriForCausalLM:
         """Load or convert model."""
