@@ -1,17 +1,20 @@
-"""Constants for NIAH evaluation."""
+"""Constants for NIAH evaluation.
 
-# Estimation of characters per token for haystack generation
-CHARS_PER_TOKEN_ESTIMATE = 4
+Re-exports common constants from src/constants.py and defines
+evaluation-specific constants.
+"""
 
-# Passkey range for NIAH tests (4-digit numbers)
-PASSKEY_MIN = 1000
-PASSKEY_MAX = 9999
-
-# Token buffer for prompt construction
-TOKEN_BUFFER = 50
+from ..constants import (
+    CHARS_PER_TOKEN_ESTIMATE,
+    PASSKEY_MIN,
+    PASSKEY_MAX,
+    NEEDLE_TOKEN_BUFFER as TOKEN_BUFFER,
+    MULTI_QUERY_TOKEN_BUFFER,
+)
 
 # Minimum haystack tokens
 MIN_HAYSTACK_TOKENS = 100
+MIN_HAYSTACK_TOKENS_MQ = 200  # For multi-query
 
 # Haystack filler text (Paul Graham essays style - commonly used)
 HAYSTACK_TEMPLATE = """

@@ -10,12 +10,14 @@ Based on HSA-UltraLong paper methodology:
 - Context lengths: 4K, 8K, 16K, 32K, 64K, etc.
 """
 
-import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 from transformers import PreTrainedTokenizerBase
+
+from .base import BaseNIAHEvaluator
+from .constants import TOKEN_BUFFER, MIN_HAYSTACK_TOKENS
 
 
 @dataclass
@@ -44,28 +46,12 @@ class NIAHConfig:
             self.depth_percentages = [0.0, 0.25, 0.5, 0.75, 1.0]
 
 
-# Haystack filler text (Paul Graham essays style - commonly used)
-HAYSTACK_TEMPLATE = """
-The quick brown fox jumps over the lazy dog. This is a sample sentence that
-serves as filler text in our haystack. Language models need to process long
-sequences efficiently, and this test helps evaluate their ability to retrieve
-specific information from within lengthy contexts. The development of attention
-mechanisms has revolutionized natural language processing, enabling models to
-focus on relevant parts of the input sequence. Transformer architectures have
-become the foundation of modern language models, with innovations like sparse
-attention helping to extend context windows beyond what was previously possible.
-Memory-augmented transformers represent a promising direction for handling
-ultra-long contexts by compressing historical information into retrievable
-memory states. This approach allows models to maintain relevant information
-over extended sequences without the quadratic complexity of full attention.
-"""
-
 NEEDLE_TEMPLATE = "The secret passkey is {passkey}. Remember this number."
 
 QUESTION_TEMPLATE = "What is the secret passkey mentioned in the text above?"
 
 
-class NIAHEvaluator:
+class NIAHEvaluator(BaseNIAHEvaluator):
     """Evaluator for Needle-in-a-Haystack tests."""
 
     def __init__(
@@ -82,65 +68,13 @@ class NIAHEvaluator:
             tokenizer: Tokenizer for the model.
             config: Evaluation configuration.
         """
-        self.model = model
-        self.tokenizer = tokenizer
         self.config = config or NIAHConfig()
-        self.device = next(model.parameters()).device
-
-        random.seed(self.config.seed)
-
-    def _generate_passkey(self) -> str:
-        """Generate a random 4-digit passkey."""
-        return str(random.randint(1000, 9999))
-
-    def _create_haystack(self, target_tokens: int) -> str:
-        """
-        Create haystack text of approximately target_tokens length.
-
-        Args:
-            target_tokens: Target number of tokens.
-
-        Returns:
-            Haystack text.
-        """
-        # Estimate tokens per character (roughly 4 chars per token for English)
-        chars_per_token = 4
-        target_chars = target_tokens * chars_per_token
-
-        # Repeat template until we reach target length
-        haystack = ""
-        while len(haystack) < target_chars:
-            haystack += HAYSTACK_TEMPLATE
-
-        return haystack[:target_chars]
-
-    def _insert_needle(self, haystack: str, needle: str, depth_percent: float) -> str:
-        """
-        Insert needle at specified depth in haystack.
-
-        Args:
-            haystack: The haystack text.
-            needle: The needle to insert.
-            depth_percent: Position (0.0 = start, 1.0 = end).
-
-        Returns:
-            Haystack with needle inserted.
-        """
-        # Find sentence boundaries for cleaner insertion
-        sentences = haystack.split(". ")
-
-        if len(sentences) <= 1:
-            # If no sentences, just insert at position
-            pos = int(len(haystack) * depth_percent)
-            return haystack[:pos] + " " + needle + " " + haystack[pos:]
-
-        # Calculate insertion index
-        insert_idx = int(len(sentences) * depth_percent)
-        insert_idx = max(0, min(insert_idx, len(sentences) - 1))
-
-        # Insert needle
-        sentences.insert(insert_idx, needle)
-        return ". ".join(sentences)
+        super().__init__(
+            model=model,
+            tokenizer=tokenizer,
+            seed=self.config.seed,
+            max_new_tokens=self.config.max_new_tokens,
+        )
 
     def _create_prompt(
         self, context_length: int, depth_percent: float
@@ -162,10 +96,10 @@ class NIAHEvaluator:
         # Reserve tokens for needle and question
         needle_tokens = len(self.tokenizer.encode(needle))
         question_tokens = len(self.tokenizer.encode(QUESTION_TEMPLATE))
-        haystack_tokens = context_length - needle_tokens - question_tokens - 50
+        haystack_tokens = context_length - needle_tokens - question_tokens - TOKEN_BUFFER
 
-        if haystack_tokens < 100:
-            haystack_tokens = 100
+        if haystack_tokens < MIN_HAYSTACK_TOKENS:
+            haystack_tokens = MIN_HAYSTACK_TOKENS
 
         # Create haystack and insert needle
         haystack = self._create_haystack(haystack_tokens)
@@ -268,32 +202,8 @@ class NIAHEvaluator:
                     f"({result['correct']}/{result['total']})"
                 )
 
-        # Calculate summary statistics
-        by_context: Dict[int, List[float]] = {}
-        by_depth: Dict[float, List[float]] = {}
-
-        for r in results["results"]:
-            ctx = r["context_length"]
-            depth = r["depth_percent"]
-            acc = r["accuracy"]
-
-            if ctx not in by_context:
-                by_context[ctx] = []
-            by_context[ctx].append(acc)
-
-            if depth not in by_depth:
-                by_depth[depth] = []
-            by_depth[depth].append(acc)
-
-        results["summary"]["by_context_length"] = {
-            k: sum(v) / len(v) for k, v in by_context.items()
-        }
-        results["summary"]["by_depth"] = {
-            k: sum(v) / len(v) for k, v in by_depth.items()
-        }
-        results["summary"]["overall_accuracy"] = sum(
-            r["accuracy"] for r in results["results"]
-        ) / len(results["results"])
+        # Calculate summary statistics using base class method
+        results["summary"] = self._compute_summary(results["results"])
 
         print("\n" + "=" * 60)
         print("Summary")

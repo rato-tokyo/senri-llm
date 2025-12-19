@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from ..memory import TensorMemory
-from ..utils import repeat_kv
+from ..utils import repeat_kv, get_device_and_dtype_from_module
 
 
 class SenriAttention(nn.Module):
@@ -81,11 +81,11 @@ class SenriAttention(nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        output_attentions: bool = False,
-        use_cache: bool = False,
+        attention_mask: Optional[torch.Tensor] = None,  # noqa: ARG002
+        position_ids: Optional[torch.Tensor] = None,  # noqa: ARG002
+        past_key_value: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # noqa: ARG002
+        output_attentions: bool = False,  # noqa: ARG002
+        use_cache: bool = False,  # noqa: ARG002
     ) -> Tuple[
         torch.Tensor,
         Optional[torch.Tensor],
@@ -142,8 +142,5 @@ class SenriAttention(nn.Module):
         dtype: Optional[torch.dtype] = None,
     ):
         """Reset memory state for new sequence."""
-        if device is None:
-            device = self.q_proj.weight.device
-        if dtype is None:
-            dtype = self.q_proj.weight.dtype
+        device, dtype = get_device_and_dtype_from_module(self, device, dtype)
         self.memory.reset(device, dtype)

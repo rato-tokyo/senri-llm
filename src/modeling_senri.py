@@ -16,6 +16,7 @@ from transformers.cache_utils import Cache, DynamicCache
 from .configuration_senri import SenriConfig
 from .modules import SenriRMSNorm
 from .decoder import SenriDecoderLayer
+from .utils import get_device_and_dtype_from_module
 
 
 class SenriPreTrainedModel(PreTrainedModel):
@@ -256,10 +257,7 @@ class SenriForCausalLM(SenriPreTrainedModel, GenerationMixin):  # type: ignore[m
             device: Device for memory tensors. If None, uses model's device.
             dtype: Data type for memory tensors. If None, uses model's dtype.
         """
-        if device is None:
-            device = self.lm_head.weight.device
-        if dtype is None:
-            dtype = self.lm_head.weight.dtype
+        device, dtype = get_device_and_dtype_from_module(self, device, dtype)
         self.model.reset_memory(device, dtype)
 
     @contextmanager

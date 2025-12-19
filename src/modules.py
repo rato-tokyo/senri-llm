@@ -6,12 +6,13 @@ import torch
 import torch.nn as nn
 
 from .configuration_senri import SenriConfig
+from .constants import EPSILON_NORM, DEFAULT_ROPE_THETA, DEFAULT_MAX_POSITION_EMBEDDINGS
 
 
 class SenriRMSNorm(nn.Module):
     """RMSNorm implementation."""
 
-    def __init__(self, hidden_size: int, eps: float = 1e-6):
+    def __init__(self, hidden_size: int, eps: float = EPSILON_NORM):
         super().__init__()
         self.weight = nn.Parameter(torch.ones(hidden_size))
         self.eps = eps
@@ -28,7 +29,10 @@ class SenriRotaryEmbedding(nn.Module):
     """Rotary Position Embedding."""
 
     def __init__(
-        self, dim: int, max_position_embeddings: int = 32768, base: float = 10000.0
+        self,
+        dim: int,
+        max_position_embeddings: int = DEFAULT_MAX_POSITION_EMBEDDINGS,
+        base: float = DEFAULT_ROPE_THETA,
     ):
         super().__init__()
         self.dim = dim

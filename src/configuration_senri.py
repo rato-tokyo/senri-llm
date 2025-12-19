@@ -2,6 +2,8 @@
 
 from transformers import LlamaConfig
 
+from .constants import EPSILON_MEMORY
+
 
 class SenriConfig(LlamaConfig):
     """
@@ -20,7 +22,7 @@ class SenriConfig(LlamaConfig):
         first_memory_layer: int = 10,
         memory_layer_interval: int = 10,
         # Normalization
-        memory_eps: float = 1e-6,
+        memory_eps: float = EPSILON_MEMORY,
         **kwargs,
     ):
         """

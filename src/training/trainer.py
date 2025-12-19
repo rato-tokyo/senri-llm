@@ -12,7 +12,7 @@ from transformers import (
 )
 
 from ..modeling_senri import SenriForCausalLM
-from ..utils import get_device, clear_memory
+from ..utils import get_device, clear_memory, device_to_string
 from .config import TrainingConfig
 
 
@@ -54,11 +54,10 @@ class SenriTrainer:
             self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         else:
             print(f"Converting from {self.config.model_name}")
-            device_str = "cuda" if self.device.type == "cuda" else "cpu"
             self.model = convert_to_senri(
                 model_name=self.config.model_name,
                 output_dir=str(model_path),
-                device=device_str,
+                device=device_to_string(self.device),
             )
             self.tokenizer = AutoTokenizer.from_pretrained(self.config.model_name)
 

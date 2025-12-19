@@ -20,6 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 from transformers import PreTrainedTokenizerBase
 
+from .base import BaseNIAHEvaluator
+from .constants import CHARS_PER_TOKEN_ESTIMATE, MULTI_QUERY_TOKEN_BUFFER, MIN_HAYSTACK_TOKENS_MQ
+
 
 @dataclass
 class MultiQueryConfig:
@@ -93,7 +96,7 @@ Research continues to push the boundaries of context length capabilities.
 """
 
 
-class MultiQueryNIAHEvaluator:
+class MultiQueryNIAHEvaluator(BaseNIAHEvaluator):
     """Evaluator for Multi-Query Needle-in-a-Haystack tests."""
 
     def __init__(
@@ -110,16 +113,17 @@ class MultiQueryNIAHEvaluator:
             tokenizer: Tokenizer for the model.
             config: Evaluation configuration.
         """
-        self.model = model
-        self.tokenizer = tokenizer
         self.config = config or MultiQueryConfig()
-        self.device = next(model.parameters()).device
-
-        random.seed(self.config.seed)
+        super().__init__(
+            model=model,
+            tokenizer=tokenizer,
+            seed=self.config.seed,
+            max_new_tokens=self.config.max_new_tokens,
+        )
 
     def _generate_value(self) -> str:
         """Generate a random 4-digit value."""
-        return str(random.randint(1000, 9999))
+        return self._generate_passkey()  # Reuse base class method
 
     def _create_kv_pairs(self) -> List[Dict[str, str]]:
         """
@@ -149,8 +153,7 @@ class MultiQueryNIAHEvaluator:
 
     def _create_haystack(self, target_tokens: int) -> str:
         """Create haystack text of approximately target length."""
-        chars_per_token = 4
-        target_chars = target_tokens * chars_per_token
+        target_chars = target_tokens * CHARS_PER_TOKEN_ESTIMATE
 
         haystack = ""
         while len(haystack) < target_chars:
@@ -222,10 +225,10 @@ class MultiQueryNIAHEvaluator:
         questions_text = " ".join(questions)
         needles_tokens = len(self.tokenizer.encode(needles_text))
         questions_tokens = len(self.tokenizer.encode(questions_text))
-        haystack_tokens = context_length - needles_tokens - questions_tokens - 100
+        haystack_tokens = context_length - needles_tokens - questions_tokens - MULTI_QUERY_TOKEN_BUFFER
 
-        if haystack_tokens < 200:
-            haystack_tokens = 200
+        if haystack_tokens < MIN_HAYSTACK_TOKENS_MQ:
+            haystack_tokens = MIN_HAYSTACK_TOKENS_MQ
 
         # Create haystack and insert needles
         haystack = self._create_haystack(haystack_tokens)

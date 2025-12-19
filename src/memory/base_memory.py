@@ -6,11 +6,14 @@ This is the simplest possible implementation following new-llm's approach:
 - Normalization by batch_size * seq_len
 """
 
+import logging
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 
 def elu_plus_one(x: torch.Tensor) -> torch.Tensor:
@@ -141,6 +144,11 @@ class TensorMemory(nn.Module):
 
         # Skip update if delta contains NaN/Inf (safety check)
         if torch.isnan(delta_M).any() or torch.isinf(delta_M).any():
+            logger.warning(
+                "NaN/Inf detected in memory update delta_M, skipping update. "
+                f"keys stats: min={keys.min():.4f}, max={keys.max():.4f}, "
+                f"values stats: min={values.min():.4f}, max={values.max():.4f}"
+            )
             return
 
         # Complete detach for stability (following new-llm)
@@ -151,6 +159,10 @@ class TensorMemory(nn.Module):
 
         # Skip z update if delta contains NaN/Inf
         if torch.isnan(delta_z).any() or torch.isinf(delta_z).any():
+            logger.warning(
+                "NaN/Inf detected in memory update delta_z, skipping z update. "
+                f"sigma_keys stats: min={sigma_keys.min():.4f}, max={sigma_keys.max():.4f}"
+            )
             return
 
         self.z = (self.z + delta_z).detach()
@@ -196,6 +208,11 @@ class TensorMemory(nn.Module):
 
         # NaN/Inf safety check - return zeros if output is invalid
         if torch.isnan(output).any() or torch.isinf(output).any():
+            logger.warning(
+                "NaN/Inf detected in memory retrieve output, returning zeros. "
+                f"numerator stats: min={numerator.min():.4f}, max={numerator.max():.4f}, "
+                f"denominator stats: min={denominator.min():.4f}, max={denominator.max():.4f}"
+            )
             return torch.zeros_like(queries)
 
         return output

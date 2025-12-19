@@ -55,6 +55,85 @@ ATTENTION_BIAS_COMPONENTS = [
 ]
 
 
+def _determine_memory_layer_config(num_layers: int) -> tuple:
+    """
+    Determine memory layer configuration based on model size.
+
+    Args:
+        num_layers: Total number of layers in the model.
+
+    Returns:
+        Tuple of (num_memory_layers, first_memory_layer, memory_layer_interval).
+    """
+    if num_layers <= 12:
+        # Small model: 2 memory layers at 1/3 and 2/3
+        num_memory_layers = 2
+        first_memory_layer = num_layers // 3
+        memory_layer_interval = num_layers // 3
+    else:
+        # Larger model: 3 memory layers
+        num_memory_layers = 3
+        first_memory_layer = num_layers // 2
+        memory_layer_interval = num_layers // 6
+
+    return num_memory_layers, first_memory_layer, memory_layer_interval
+
+
+def _convert_embeddings_and_lm_head(base_state_dict: dict) -> dict:
+    """
+    Convert embeddings and LM head weights.
+
+    Args:
+        base_state_dict: Base model state dict.
+
+    Returns:
+        dict: Converted weights for embeddings and LM head.
+    """
+    converted = {}
+
+    # Embeddings and final norm
+    converted["model.embed_tokens.weight"] = base_state_dict["model.embed_tokens.weight"]
+    converted["model.norm.weight"] = base_state_dict["model.norm.weight"]
+
+    # LM head (may be tied to embeddings)
+    if "lm_head.weight" in base_state_dict:
+        converted["lm_head.weight"] = base_state_dict["lm_head.weight"]
+    else:
+        # Tied embeddings
+        converted["lm_head.weight"] = base_state_dict["model.embed_tokens.weight"]
+
+    return converted
+
+
+def _convert_all_layers(
+    base_state_dict: dict, senri_config: SenriConfig, num_layers: int
+) -> dict:
+    """
+    Convert all decoder layer weights.
+
+    Args:
+        base_state_dict: Base model state dict.
+        senri_config: Senri configuration for memory layer detection.
+        num_layers: Number of layers to convert.
+
+    Returns:
+        dict: Converted weights for all layers.
+    """
+    converted = {}
+
+    for layer_idx in range(num_layers):
+        has_memory = senri_config.is_memory_layer(layer_idx)
+        layer_weights = convert_layer_weights(base_state_dict, layer_idx, has_memory)
+        converted.update(layer_weights)
+
+        if has_memory:
+            print(f"  Layer {layer_idx}: Converted (with Senri Memory)")
+        else:
+            print(f"  Layer {layer_idx}: Converted")
+
+    return converted
+
+
 def convert_layer_weights(
     base_state_dict: dict, layer_idx: int, has_memory: bool
 ) -> dict:
@@ -125,17 +204,9 @@ def convert_to_senri(
     head_dim = base_config.hidden_size // base_config.num_attention_heads
 
     # Determine memory layer configuration based on model size
-    num_layers = base_config.num_hidden_layers
-    if num_layers <= 12:
-        # Small model: 2 memory layers at 1/3 and 2/3
-        num_memory_layers = 2
-        first_memory_layer = num_layers // 3
-        memory_layer_interval = num_layers // 3
-    else:
-        # Larger model: 3 memory layers
-        num_memory_layers = 3
-        first_memory_layer = num_layers // 2
-        memory_layer_interval = num_layers // 6
+    num_memory_layers, first_memory_layer, memory_layer_interval = (
+        _determine_memory_layer_config(base_config.num_hidden_layers)
+    )
 
     # Create Senri config based on base config
     senri_config = SenriConfig(
@@ -168,31 +239,15 @@ def convert_to_senri(
     print("Converting weights...")
     senri_state_dict = {}
 
-    # Embeddings and final norm
-    senri_state_dict["model.embed_tokens.weight"] = base_state_dict[
-        "model.embed_tokens.weight"
-    ]
-    senri_state_dict["model.norm.weight"] = base_state_dict["model.norm.weight"]
-
-    # LM head (may be tied to embeddings)
-    if "lm_head.weight" in base_state_dict:
-        senri_state_dict["lm_head.weight"] = base_state_dict["lm_head.weight"]
-    else:
-        # Tied embeddings
-        senri_state_dict["lm_head.weight"] = base_state_dict[
-            "model.embed_tokens.weight"
-        ]
+    # Convert embeddings and LM head
+    senri_state_dict.update(_convert_embeddings_and_lm_head(base_state_dict))
 
     # Convert each layer
-    for layer_idx in range(base_config.num_hidden_layers):
-        has_memory = senri_config.is_memory_layer(layer_idx)
-        layer_weights = convert_layer_weights(base_state_dict, layer_idx, has_memory)
-        senri_state_dict.update(layer_weights)
-
-        if has_memory:
-            print(f"  Layer {layer_idx}: Converted (with Senri Memory)")
-        else:
-            print(f"  Layer {layer_idx}: Converted")
+    senri_state_dict.update(
+        _convert_all_layers(
+            base_state_dict, senri_config, base_config.num_hidden_layers
+        )
+    )
 
     # Load weights into Senri model
     print("Loading weights into Senri model...")
